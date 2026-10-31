@@ -3,30 +3,55 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="theme-color" content="#070b16"/>
   <title>TypeRacer 3D</title>
   <link rel="stylesheet" href="./style.css"/>
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body>
+  <!-- liquid-glass refraction filters (Chrome/Edge: real edge displacement;
+       Safari/Firefox fall back to the blurred-glass layer in CSS) -->
+  <svg class="defs" aria-hidden="true" focusable="false">
+    <defs>
+      <!-- glassify-style liquid refraction: gentle organic warp of the backdrop -->
+      <filter id="lg-liquid" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="7" result="noise"/>
+        <feGaussianBlur in="noise" stdDeviation="6" result="soft"/>
+        <feDisplacementMap in="SourceGraphic" in2="soft" scale="36" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <!-- stronger refraction for the hero cards -->
+      <filter id="lg-card" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.006 0.009" numOctaves="2" seed="11" result="noise"/>
+        <feGaussianBlur in="noise" stdDeviation="7" result="soft"/>
+        <feDisplacementMap in="SourceGraphic" in2="soft" scale="52" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <!-- fine film grain for the whole menu backdrop -->
+      <filter id="lg-grain">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="3" stitchTiles="stitch"/>
+        <feColorMatrix type="saturate" values="0"/>
+      </filter>
+    </defs>
+  </svg>
+
   <canvas id="scene"></canvas>
 
   <!-- ============ RACE HUD ============ -->
   <div id="hud" class="hidden">
-    <div id="dataBadge"></div>
+    <div id="dataBadge" class="glass"></div>
 
-    <div id="statsPanel">
+    <div id="statsPanel" class="glass">
       <div id="rankBig">–</div>
       <div id="rankOf"></div>
       <div class="statRow"><span id="wpmVal">0</span><label>wpm</label></div>
       <div class="statRow"><span id="accVal">100</span><label>% acc</label></div>
     </div>
 
-    <div id="minimapPanel">
+    <div id="minimapPanel" class="glass">
       <div class="panelTitle">TRACK</div>
       <canvas id="minimap" width="112" height="248"></canvas>
     </div>
 
-    <div id="board"></div>
+    <div id="board" class="glass"></div>
 
     <div id="mirrorFrame" class="hidden"><div class="mirrorGlass"></div></div>
 
@@ -39,7 +64,7 @@
     <div id="centerMsg"></div>
     <div id="vignette"></div>
 
-    <div id="typingPanel">
+    <div id="typingPanel" class="glass">
       <div id="typingText"></div>
       <input id="typeInput" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="typing input"/>
     </div>
@@ -49,60 +74,78 @@
 
   <!-- ============ MENU ============ -->
   <div id="menu">
-    <div class="menuCard">
-      <h1>TYPE<span>RACER</span> <em>3D</em></h1>
-      <p class="tagline">Real TypeRacer races — replayed in a 3D world you drive through</p>
+    <div class="aurora" aria-hidden="true">
+      <i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i>
+    </div>
+    <div class="grain" aria-hidden="true"></div>
 
-      <div id="themeCards"></div>
+    <div class="menuWrap">
+      <header class="hero">
+        <div class="heroChips">
+          <span class="chip"><i class="pulse"></i>real TypeRacer data</span>
+          <span class="chip">0 dependencies</span>
+          <span class="chip">4 themes · day / night</span>
+        </div>
+        <h1 class="wordmark">TypeRacer <span class="th">3D</span></h1>
+        <p class="tagline">Real races, replayed in a 3D world you drive through —
+          every opponent is a real human's keystroke timing, revived.</p>
+      </header>
 
-      <div class="setupGrid">
-        <div class="setupRow">
-          <label>Your TypeRacer username <span class="opt">(optional)</span></label>
-          <div class="userRow">
-            <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
-            <button id="loadStats">load</button>
+      <div id="themeCards" class="themeGrid"></div>
+
+      <section class="setup glass">
+        <div class="setupGrid">
+          <div class="setupRow">
+            <label>Your TypeRacer username <span class="opt">optional — race as yourself</span></label>
+            <div class="userRow">
+              <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
+              <button id="loadStats">load</button>
+            </div>
+            <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
           </div>
-          <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
+
+          <div class="setupRow">
+            <label>Opponent pace</label>
+            <select id="difficulty">
+              <option value="chill">😴 Chill · ~45 WPM</option>
+              <option value="normal" selected>😎 Normal · ~70 WPM</option>
+              <option value="hard">🔥 Hard · ~95 WPM</option>
+              <option value="mine">🎯 Match my real average</option>
+              <option value="real">⚡ Real speeds of this race</option>
+            </select>
+          </div>
+
+          <div class="setupRow">
+            <label>Typing mode</label>
+            <select id="typingMode">
+              <option value="realistic" selected>⌨️ Realistic · fix mistakes with backspace</option>
+              <option value="arcade">🕹️ Arcade · wrong keys don't stick</option>
+            </select>
+          </div>
+
+          <div class="setupRow">
+            <label>Time of day</label>
+            <select id="timeOfDay">
+              <option value="day" selected>☀️ Day</option>
+              <option value="sunset">🌇 Sunset</option>
+              <option value="night">🌙 Night</option>
+            </select>
+          </div>
         </div>
 
-        <div class="setupRow">
-          <label>Opponent pace</label>
-          <select id="difficulty">
-            <option value="chill">😴 Chill · ~45 WPM</option>
-            <option value="normal" selected>😎 Normal · ~70 WPM</option>
-            <option value="hard">🔥 Hard · ~95 WPM</option>
-            <option value="mine">🎯 Match my real average</option>
-            <option value="real">⚡ Real speeds of this race</option>
-          </select>
-        </div>
-
-        <div class="setupRow">
-          <label>Typing mode</label>
-          <select id="typingMode">
-            <option value="realistic" selected>⌨️ Realistic · fix mistakes with backspace</option>
-            <option value="arcade">🕹️ Arcade · wrong keys don't stick</option>
-          </select>
-        </div>
-
-        <div class="setupRow">
-          <label>Time of day</label>
-          <select id="timeOfDay">
-            <option value="day" selected>☀️ Day</option>
-            <option value="sunset">🌇 Sunset</option>
-            <option value="night">🌙 Night</option>
-          </select>
-        </div>
-      </div>
-
-      <button id="startBtn">🏁 &nbsp;START RACE</button>
-      <div id="menuBadge" class="menuBadge"></div>
-      <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
+        <button id="startBtn" class="cta"><span class="ctaInner">🏁 &nbsp;START RACE</span></button>
+        <div id="menuBadge" class="menuBadge"></div>
+        <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
+      </section>
     </div>
   </div>
 
   <!-- ============ RESULTS ============ -->
   <div id="results" class="hidden">
-    <div class="resCard">
+    <div class="aurora dim" aria-hidden="true">
+      <i class="b1"></i><i class="b2"></i><i class="b3"></i>
+    </div>
+    <div class="resCard glass">
       <div id="resPlace"></div>
       <div id="pbLine" class="pbLine hidden">🏆 new personal best!</div>
       <div id="resStats"></div>
@@ -114,7 +157,7 @@
     </div>
   </div>
 
-  <div id="toast"></div>
+  <div id="toast" class="glass"></div>
 
   <script type="module" src="./js/main.js"></script>
 </body>
