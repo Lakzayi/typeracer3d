@@ -337,6 +337,7 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
+  '.webmanifest': 'application/manifest+json',
 };
 
 function sendJSON(res, code, obj) {
@@ -350,6 +351,17 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname === '/api/race') {
+      // ?id=|tr:user|N  -> replay that EXACT race (challenge links)
+      const id = url.searchParams.get('id');
+      if (id) {
+        try {
+          const race = await loadRaceById(id);
+          if (!race || !race.text) throw new Error('not found');
+          return sendJSON(res, 200, { ...race, live: true, challenge: true });
+        } catch (e) {
+          return sendJSON(res, 404, { ok: false, error: `race not available: ${e.message}` });
+        }
+      }
       const avoidId = url.searchParams.get('avoidId') || undefined;
       const race = await getRace({ avoidId });
       return sendJSON(res, 200, race);

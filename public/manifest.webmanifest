@@ -1,0 +1,16 @@
+{
+  "name": "TypeRacer 3D",
+  "short_name": "TR3D",
+  "description": "Race real TypeRacer races in a 3D world — cars, boats, horses and rockets. Bots replay real humans' keystroke timing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b16",
+  "theme_color": "#070b16",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

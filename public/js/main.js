@@ -34,6 +34,25 @@ function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
+/* ---------------- challenge links (?race=…&theme=…&tod=…&diff=…) ----------------
+ * "share / challenge" on the results screen builds one of these URLs: the friend
+ * replays the EXACT same real race (same quote, same real opponents) in the same
+ * theme. Pure URL params — no backend. */
+const urlParams = new URLSearchParams(location.search);
+const CHALLENGE = {
+  raceId: urlParams.get('race'),
+  theme: urlParams.get('theme'),
+  tod: urlParams.get('tod'),
+  diff: urlParams.get('diff'),
+};
+if (CHALLENGE.theme && THEMES[CHALLENGE.theme] && THEMES[CHALLENGE.theme].status !== 'soon') {
+  currentThemeId = CHALLENGE.theme;
+}
+if (['day', 'sunset', 'night'].includes(CHALLENGE.tod)) settings.timeOfDay = CHALLENGE.tod;
+if (['chill', 'normal', 'hard', 'mine', 'real'].includes(CHALLENGE.diff)) {
+  $('difficulty').value = CHALLENGE.diff;
+}
+
 function applySettingsToUI() {
   $('typingMode').value = settings.typingMode;
   $('timeOfDay').value = settings.timeOfDay;
@@ -139,13 +158,27 @@ async function startRaceFlow() {
   hud.menuBadge('connecting to play.typeracer.com…');
 
   let raceData;
+  const challengeAttempt = CHALLENGE.raceId;
   try {
-    raceData = await API.race(lastRaceId);
+    if (challengeAttempt) {
+      hud.menuBadge('⚔️ loading the challenged race…');
+      raceData = await API.race({ id: challengeAttempt }); // throws if it no longer exists
+    } else {
+      raceData = await API.race(lastRaceId);
+    }
+    CHALLENGE.raceId = null; // one-shot — "race again" picks a fresh race
   } catch (e) {
-    hud.menuBadge(`✗ could not fetch a race: ${e.message}`, true);
-    hud.setStartBusy(false);
-    phase = 'menu';
-    return;
+    if (challengeAttempt) {
+      // the shared race is gone from TypeRacer — degrade gracefully
+      hud.menuBadge('⚔️ that race is no longer available — picking a fresh one instead');
+      try { raceData = await API.race(lastRaceId); }
+      catch (e2) { hud.menuBadge(`✗ could not fetch a race: ${e2.message}`, true); hud.setStartBusy(false); phase = 'menu'; return; }
+    } else {
+      hud.menuBadge(`✗ could not fetch a race: ${e.message}`, true);
+      hud.setStartBusy(false);
+      phase = 'menu';
+      return;
+    }
   }
   lastRaceId = raceData.id;
   if (raceData.demo) {
@@ -247,9 +280,11 @@ hud.els.typingPanel.addEventListener('click', () => typing && typing.focus());
 /* ---------------- results + personal best ---------------- */
 
 const PB_KEY = 'tr3d_best_v1';
+let lastResults = null;
 const origOnResults = hud.onResults.bind(hud);
 hud.onResults = (results) => {
   origOnResults(results);
+  lastResults = results;
   phase = 'finished';
   hud.showMirror(false);
   world.mirrorEnabled = false;
@@ -266,6 +301,51 @@ hud.onResults = (results) => {
     } else hud.showPB(false);
   } else hud.showPB(false);
 };
+
+/* ---------------- share / challenge ---------------- */
+
+const ORD = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
+
+$('shareBtn').addEventListener('click', async () => {
+  const me = lastResults && lastResults.rows.find((r) => r.isPlayer);
+  if (!me) return;
+
+  // challenge link: replays this exact real race, in this theme & time of day
+  const url = new URL(location.href);
+  url.search = '';
+  const q = new URLSearchParams();
+  if (lastResults.raceId) q.set('race', lastResults.raceId);
+  q.set('theme', currentThemeId);
+  q.set('tod', settings.timeOfDay);
+  const diff = $('difficulty').value;
+  if (diff !== 'normal') q.set('diff', diff);
+  url.search = q.toString();
+
+  const place = ORD[me.place - 1] ?? `${me.place}th`;
+  const wpm = Math.round(me.wpm * 10) / 10;
+  const flex = me.place === 1 ? `🏆 ${place} place` : `🏁 ${place} place`;
+  const text = `${flex} · ${wpm} WPM · ${Math.round(me.acc)}% acc — think you can beat me? 🏎️💨`;
+
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'TypeRacer 3D', text, url: url.toString() });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // user closed the share sheet
+  }
+  const full = `${text}\n${url}`;
+  try {
+    await navigator.clipboard.writeText(full);
+    hud.toast('📋 copied — paste it to a friend and race them!', 2800);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = full; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); hud.toast('📋 copied — paste it to a friend and race them!', 2800); }
+    catch { hud.toast('couldn\'t copy — long-press the address bar instead', 2800); }
+    ta.remove();
+  }
+});
 
 /* ---------------- render loop ---------------- */
 
@@ -306,5 +386,16 @@ window.__tr3d = {
   setPaused, startRaceFlow, backToMenu,
 };
 
-/* menu badge: initial hint */
-hud.menuBadge('🌐 each race is a real TypeRacer race — real text, real racers, real keystroke timing');
+/* installable / offline (PWA) — https or localhost only */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
+/* menu badge: challenge link > touch device > default hint */
+if (CHALLENGE.raceId) {
+  hud.menuBadge('⚔️ you\'ve been challenged — press START RACE to replay this exact race!');
+} else if (matchMedia('(pointer: coarse)').matches) {
+  hud.menuBadge('📱 touch detected — this game plays best with a physical keyboard');
+} else {
+  hud.menuBadge('🌐 each race is a real TypeRacer race — real text, real racers, real keystroke timing');
+}

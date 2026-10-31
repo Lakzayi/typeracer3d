@@ -12,11 +12,18 @@ async function jfetch(url) {
 }
 
 export const API = {
-  async race(avoidId) {
+  // race('lastId') -> fresh race avoiding lastId · race({ id }) -> exact challenge race
+  async race(opts) {
+    const q = new URLSearchParams();
+    if (typeof opts === 'string') q.set('avoidId', opts);
+    else if (opts && opts.id) q.set('id', opts.id);
+    else if (opts && opts.avoidId) q.set('avoidId', opts.avoidId);
+    const qs = q.toString();
     try {
-      return await jfetch('api/race' + (avoidId ? `?avoidId=${encodeURIComponent(avoidId)}` : ''));
+      return await jfetch('api/race' + (qs ? `?${qs}` : ''));
     } catch (e) {
-      const demo = demoRace(avoidId);
+      if (opts && opts.id) throw e; // a challenge race must be that race — surface the error
+      const demo = demoRace(typeof opts === 'string' ? opts : opts?.avoidId);
       demo.fallbackError = e.message;
       return demo;
     }

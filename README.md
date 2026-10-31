@@ -41,6 +41,11 @@ backspace-fixed typos (full clips: `media/gameplay-car.mp4`, `media/gameplay-hor
 - 🪞 **Rearview mirror** + **top-down minimap** of the whole track.
 - ⌨️ **Two typing modes:** *Realistic* (wrong chars stick — fix them with **Backspace**,
   TypeRacer-style) or *Arcade* (wrong keys don't stick).
+- 📣 **Share & challenge.** One click on the results screen copies your result plus a
+  **challenge link** — whoever opens it replays the *exact same race* against the same
+  real opponents, in the same theme (`?race=…&theme=…&tod=…`).
+- 📲 **Installable (PWA) & offline.** Manifest + service worker included — install it
+  from Chrome/Edge and it runs with zero network.
 - 🧪 **Zero dependencies.** One vendored Three.js file. No build step. No npm install.
 
 ## 🚀 Run
@@ -122,8 +127,13 @@ server.js               zero-dependency Node server: static + data proxies + cac
 Start TypeRacer 3D.bat  double-click launcher (Windows)
 run.sh                  bash launcher
 public/
-  index.html            menu / HUD / results shells
+  index.html            menu / HUD / results shells (+ social OG tags)
   style.css
+  og.jpg                social link-card preview (1200×630)
+  favicon.svg           checkered-flag tab icon
+  manifest.webmanifest  PWA manifest (installable)
+  sw.js                 service worker (offline caching)
+  icons/                PWA app icons (192 / 512 / 512-maskable)
   vendor/three.module.js  Three.js r160 (vendored, works offline)
   js/
     main.js             phase machine, settings, render loop

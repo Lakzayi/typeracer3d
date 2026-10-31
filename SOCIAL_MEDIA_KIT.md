@@ -13,6 +13,7 @@ time overlaps (≈ 14:00–18:00 UTC).
 | `media/gameplay-car.mp4` (~57s, 720p) | **X / Twitter video** — night street race: comeback duel for gold, real hesitations + backspace-fixed typos. Upload natively (don't link) |
 | `media/gameplay-horse.mp4` (~62s, 720p) | **X / Twitter video** #2 — wild west duel: early lead, mid-race falter, final-sprint gold |
 | `media/gameplay-split.gif` (16s loop, tracked in git) | README embed, Discord, Reddit preview — car \| horse side by side |
+| `public/og.jpg` (1200×630) | link preview card — also upload as the repo **Social preview** (Settings → Social preview) |
 | `docs/screenshots/*.png` (10 shots) | follow-up tweets, threads, Discord |
 
 **Tip:** X autoplay + mute → your first frame must look good. The night street
@@ -117,7 +118,15 @@ race with glowing headlights + combo flames is the strongest opener.
 ## ✅ Posting checklist
 
 1. Push to GitHub first — the link is the call-to-action.
-2. Upload `gameplay.mp4` **natively** on X (native video gets ~10× reach vs links).
-3. Pin the main tweet; reply with the screenshots thread.
-4. Put the GIF at the very top of the README (it renders inline on github.com).
-5. Add the repo topics on GitHub: `threejs`, `typing-game`, `gamedev`, `webgl`, `typeracer`.
+2. Repo polish: description ("TypeRacer as a 3D racing game — bots replay real
+   humans' keystroke timing"), topics (`threejs`, `typing-game`, `gamedev`,
+   `webgl`, `typeracer`), and upload `public/og.jpg` as the **Social preview**.
+3. Upload `gameplay-car.mp4` **natively** on X (native video gets ~10× reach vs links).
+4. Pin the main tweet; reply with the screenshots thread.
+5. Put the GIF at the very top of the README (it renders inline on github.com).
+6. In replies, show the **challenge mechanic**: "finish a race, hit share/challenge,
+   and the link makes your friend replay your EXACT race against the same ghosts."
+   That loop (every finisher recruits challengers) is the growth engine.
+7. After GitHub Pages is live, switch the `og:url` / `og:image` / `twitter:image`
+   meta tags in `public/index.html` to absolute `https://<you>.github.io/<repo>/…`
+   URLs so X renders the big image card.
