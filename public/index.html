@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>TypeRacer 3D</title>
+  <link rel="stylesheet" href="./style.css"/>
+  <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <!-- ============ RACE HUD ============ -->
+  <div id="hud" class="hidden">
+    <div id="dataBadge"></div>
+
+    <div id="statsPanel">
+      <div id="rankBig">–</div>
+      <div id="rankOf"></div>
+      <div class="statRow"><span id="wpmVal">0</span><label>wpm</label></div>
+      <div class="statRow"><span id="accVal">100</span><label>% acc</label></div>
+    </div>
+
+    <div id="minimapPanel">
+      <div class="panelTitle">TRACK</div>
+      <canvas id="minimap" width="112" height="248"></canvas>
+    </div>
+
+    <div id="board"></div>
+
+    <div id="mirrorFrame" class="hidden"><div class="mirrorGlass"></div></div>
+
+    <div id="comboBadge" class="hidden"></div>
+
+    <button id="soundBtn" title="toggle sound">🔊</button>
+    <div id="escHint">ESC · leave race &nbsp;·&nbsp; N · day/night</div>
+
+    <div id="errorFlash"></div>
+    <div id="centerMsg"></div>
+    <div id="vignette"></div>
+
+    <div id="typingPanel">
+      <div id="typingText"></div>
+      <input id="typeInput" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="typing input"/>
+    </div>
+
+    <div id="pauseOverlay" class="hidden">⏸ Paused — click anywhere to resume</div>
+  </div>
+
+  <!-- ============ MENU ============ -->
+  <div id="menu">
+    <div class="menuCard">
+      <h1>TYPE<span>RACER</span> <em>3D</em></h1>
+      <p class="tagline">Real TypeRacer races — replayed in a 3D world you drive through</p>
+
+      <div id="themeCards"></div>
+
+      <div class="setupGrid">
+        <div class="setupRow">
+          <label>Your TypeRacer username <span class="opt">(optional)</span></label>
+          <div class="userRow">
+            <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
+            <button id="loadStats">load</button>
+          </div>
+          <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
+        </div>
+
+        <div class="setupRow">
+          <label>Opponent pace</label>
+          <select id="difficulty">
+            <option value="chill">😴 Chill · ~45 WPM</option>
+            <option value="normal" selected>😎 Normal · ~70 WPM</option>
+            <option value="hard">🔥 Hard · ~95 WPM</option>
+            <option value="mine">🎯 Match my real average</option>
+            <option value="real">⚡ Real speeds of this race</option>
+          </select>
+        </div>
+
+        <div class="setupRow">
+          <label>Typing mode</label>
+          <select id="typingMode">
+            <option value="realistic" selected>⌨️ Realistic · fix mistakes with backspace</option>
+            <option value="arcade">🕹️ Arcade · wrong keys don't stick</option>
+          </select>
+        </div>
+
+        <div class="setupRow">
+          <label>Time of day</label>
+          <select id="timeOfDay">
+            <option value="day" selected>☀️ Day</option>
+            <option value="sunset">🌇 Sunset</option>
+            <option value="night">🌙 Night</option>
+          </select>
+        </div>
+      </div>
+
+      <button id="startBtn">🏁 &nbsp;START RACE</button>
+      <div id="menuBadge" class="menuBadge"></div>
+      <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
+    </div>
+  </div>
+
+  <!-- ============ RESULTS ============ -->
+  <div id="results" class="hidden">
+    <div class="resCard">
+      <div id="resPlace"></div>
+      <div id="pbLine" class="pbLine hidden">🏆 new personal best!</div>
+      <div id="resStats"></div>
+      <div id="resBoard"></div>
+      <div class="resBtns">
+        <button id="againBtn">↺ &nbsp;race again</button>
+        <button id="menuBtn">menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

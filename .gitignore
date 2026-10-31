@@ -1,0 +1,15 @@
+# media: only the split gif is tracked (clones stay light);
+# the mp4s are generated locally for social uploads
+media/*
+!media/gameplay-split.gif
+
+# runtime caches & state
+data/cache/
+data/pool.json
+data/clip-*.webm
+
+# editor / OS noise
+node_modules/
+.DS_Store
+Thumbs.db
+*.log

@@ -1,0 +1,24 @@
+{
+  "name": "typeracer3d",
+  "version": "1.0.0",
+  "description": "Race real TypeRacer races in a 3D world — cars, boats, horses, rockets. Bots replay real humans' keystroke timing. Zero dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "typeracer",
+    "typing-game",
+    "threejs",
+    "3d",
+    "racing",
+    "wpm",
+    "typing",
+    "game"
+  ],
+  "author": "Hossein Lakzaei <hosseinlack123@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}
