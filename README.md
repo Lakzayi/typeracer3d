@@ -63,13 +63,14 @@ Requires Node 18+. No install step — there are no dependencies.
 
 ## 🌐 Play online (GitHub Pages)
 
+**▶ https://lakzayi.github.io/typeracer3d/** — playable, installable, shareable.
+
 Without a server the game auto-switches to **demo mode**: bundled quotes and
 synthetic opponents (clearly labeled `🟠 demo race`). Deploy it yourself:
 
-1. Push this repo to GitHub (Settings → Pages → Deploy from branch → `main` /root),
-   or just keep the included workflow at `.github/workflows/pages.yml` which
-   publishes `public/` automatically.
-2. `https://<you>.github.io/<repo>/` — playable, installable, shareable.
+1. Push this repo to GitHub — the included workflow at
+   `.github/workflows/pages.yml` publishes `public/` automatically on push to `main`.
+2. Settings → Pages → Build from **GitHub Actions**.
 
 Run `node server.js` locally any time to race **real** TypeRacer data instead.
 

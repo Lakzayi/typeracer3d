@@ -38,7 +38,7 @@ race with glowing headlights + combo flames is the strongest opener.
 >
 > 4 themes: cars, boats, horses, rockets 🚀
 > Free & open source 👇
-> [github link]
+> https://github.com/Lakzayi/typeracer3d
 >
 > #gamedev #threejs #javascript #webgl #indiedev
 
@@ -60,7 +60,7 @@ race with glowing headlights + combo flames is the strongest opener.
 > - day / sunset / night in every theme 🌗
 > - top-down minimap, zero dependencies
 >
-> [github link]
+> https://github.com/Lakzayi/typeracer3d
 
 **Short & punchy alternative:**
 
@@ -69,7 +69,7 @@ race with glowing headlights + combo flames is the strongest opener.
 > real TypeRacer races → 3D world
 > open source, zero dependencies
 >
-> [github link]
+> https://github.com/Lakzayi/typeracer3d
 > #threejs #webgl #gamedev
 
 ---
@@ -85,7 +85,7 @@ race with glowing headlights + combo flames is the strongest opener.
 >
 > ۴ تم: ماشین، قایق، اسب، موشک 🚀
 > رایگان و متن‌باز 👇
-> [github link]
+> https://github.com/Lakzayi/typeracer3d
 >
 > #گیم_سازی #جاوااسکریپت #برنامه_نویسی
 
@@ -95,7 +95,7 @@ race with glowing headlights + combo flames is the strongest opener.
 > یعنی تایم دقیق هر کلید. ربات‌های من همون آدم‌های واقعی هستن که
 > کلید-به-کلید بازپخش می‌شن. داری با روح یه غریبه‌ی سال ۲۰۱۹ مسابقه می‌دی 👻
 >
-> [github link]
+> https://github.com/Lakzayi/typeracer3d
 
 ---
 
