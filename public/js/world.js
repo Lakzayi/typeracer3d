@@ -31,10 +31,20 @@ export class World {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // ACES filmic + per-TOD exposure: highlights keep their color instead of
+    // clipping to white, and night stays night by dropping exposure, not by
+    // flooding the scene with light (GRAPHICS_PLAN §1.1)
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.0;
+    // environment map generator (r160 core has PMREMGenerator.fromScene)
+    this.pmrem = new THREE.PMREMGenerator(this.renderer);
+    this._envRT = null;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#8fc3ea');
-    this.scene.fog = new THREE.Fog('#8fc3ea', 140, 560);
+    // exponential fog reads as atmosphere (GRAPHICS_PLAN §1.4); density and
+    // color are set per time-of-day by the themes via world.setFog()
+    this.scene.fog = new THREE.FogExp2('#8fc3ea', 0.0020);
 
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
     this.camera.position.set(0, 5, 12);
@@ -51,11 +61,19 @@ export class World {
     sun.position.set(30, 60, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -40; sun.shadow.camera.right = 40;
-    sun.shadow.camera.top = 40; sun.shadow.camera.bottom = -40;
-    sun.shadow.camera.far = 220;
+    // ortho box around the play corridor + the near scenery band
+    // (GRAPHICS_PLAN §1.3) — keeps 2048² of shadow texels on the action
+    sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
+    sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
+    sun.shadow.camera.near = 10; sun.shadow.camera.far = 180;
+    sun.shadow.camera.updateProjectionMatrix(); // frustum edits need this or they never apply
+    sun.shadow.bias = -0.0002;    // anti shadow-acne
+    sun.shadow.normalBias = 0.03; // anti peter-panning on the flat ground
     this.scene.add(sun);
     this.sun = sun;
+    // sun/moon offset relative to the player — themes rewrite this in
+    // setTimeOfDay (low sun at sunset = long shadows, moon opposite at night)
+    this.sunRig = new THREE.Vector3(30, 60, 20);
     this.hemi = hemi;
 
     this.themeGroup = null;
@@ -66,6 +84,13 @@ export class World {
     this.shakeT = 0;
     this.camPos = new THREE.Vector3(0, 5, 12);
     this.camLook = new THREE.Vector3(0, 1, -10);
+    // preallocated temporaries — update() must not allocate per frame
+    // (GRAPHICS_PLAN §1.6, SPEC §1.3)
+    this._v1 = new THREE.Vector3();
+    this._v2 = new THREE.Vector3();
+    this._m4 = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._sc = new THREE.Vector3(1, 1, 1);
     this.orbitT = 0;
     this.finishMode = false;
     this.confetti = null;
@@ -103,6 +128,69 @@ export class World {
   }
 
   shake(power = 1) { this.shakeT = Math.min(0.45, 0.22 * power); }
+
+  /* additive API for the themes' setTimeOfDay (GRAPHICS_PLAN §1.1, §1.4) */
+  setExposure(v) { this.renderer.toneMappingExposure = v; }
+  setFog(colorHex, density) {
+    this.scene.fog.color.set(colorHex);
+    this.scene.fog.density = density;
+  }
+
+  /* tiny gradient sky + ground patch rendered through PMREM (GRAPHICS_PLAN §1.5,
+   * core PMREMGenerator.fromScene — no addons). Runs only on theme/TOD change,
+   * never per frame. Metals/glass/water then reflect a believable sky.
+   * sunDir (optional {x,y,z}): adds an HDR sun blob to the capture so glossy
+   * surfaces get a real specular glint that moves with the sun — a smooth
+   * gradient env alone reflects back ≈ the base color and water reads as
+   * matte paint (critic r7). */
+  setEnvironment(skyTop, skyMid, skyBot, groundColor, sunDir) {
+    if (!this._envScene) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 256;
+      this._envCanvas = canvas;
+      this._envTex = new THREE.CanvasTexture(canvas);
+      this._envTex.colorSpace = THREE.SRGBColorSpace;
+      this._envScene = new THREE.Scene();
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(50, 16, 12),
+        new THREE.MeshBasicMaterial({ map: this._envTex, side: THREE.BackSide })
+      );
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(140, 140),
+        new THREE.MeshBasicMaterial({ color: '#888888' })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -1;
+      this._envScene.add(dome, ground);
+      this._envGroundMat = ground.material;
+      // HDR hot spot — overbright color (RGB > 1) survives PMREM capture, so
+      // low-roughness materials show a true sun highlight (SPEC §2)
+      this._envSun = new THREE.Mesh(
+        new THREE.SphereGeometry(4.5, 12, 8),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 8.2, 7.0) })
+      );
+      this._envSun.visible = false;
+      this._envScene.add(this._envSun);
+    }
+    // sphere UVs put canvas-bottom at the zenith — same bottom-up draw as the sky domes
+    const ctx = this._envCanvas.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, skyBot); g.addColorStop(0.42, skyMid); g.addColorStop(1, skyTop);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 256);
+    this._envTex.needsUpdate = true;
+    this._envGroundMat.color.set(groundColor);
+    if (sunDir) {
+      const len = Math.hypot(sunDir.x, sunDir.y, sunDir.z) || 1;
+      this._envSun.position.set(sunDir.x / len * 42, Math.max(6, sunDir.y / len * 42), sunDir.z / len * 42);
+      this._envSun.visible = true;
+    } else {
+      this._envSun.visible = false;
+    }
+    const rt = this.pmrem.fromScene(this._envScene, 0.04); // sigma=0.04 → soft
+    if (this._envRT) this._envRT.dispose();
+    this._envRT = rt;
+    this.scene.environment = rt.texture;
+  }
 
   confettiBurst(pos) {
     const N = 160;
@@ -173,7 +261,7 @@ export class World {
     // confetti physics
     if (this.confetti) {
       this.confetti.t += dt;
-      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1);
+      const m = this._m4, q = this._q, sc = this._sc; // reused — no per-frame alloc
       this.confetti.items.forEach((it, i) => {
         it.v.y -= 6 * dt;
         it.p.addScaledVector(it.v, dt);
@@ -186,22 +274,25 @@ export class World {
       if (this.confetti.t > 6) { this.scene.remove(this.confetti.mesh); this.confetti = null; }
     }
 
-    // camera
+    // camera (targets written into reused vectors — no per-frame alloc)
     if (this.finishMode) {
       this.orbitT += dt * 0.55;
       const r = 9.5;
       const tx = carPos.x + Math.cos(this.orbitT) * r;
       const tz = carPos.z + Math.sin(this.orbitT) * r;
-      this.camPos.lerp(new THREE.Vector3(tx, 4.2, tz), expK(2.4, dt));
-      this.camLook.lerp(new THREE.Vector3(carPos.x, 1.1, carPos.z), expK(3.5, dt));
+      this._v1.set(tx, 4.2, tz);
+      this._v2.set(carPos.x, 1.1, carPos.z);
+      this.camPos.lerp(this._v1, expK(2.4, dt));
+      this.camLook.lerp(this._v2, expK(3.5, dt));
     } else {
-      const desired = new THREE.Vector3(
+      this._v1.set(
         carPos.x * 0.86,
         4.25 + s01 * 0.55,
         carPos.z + 10.4 - s01 * 1.9
       );
-      this.camPos.lerp(desired, expK(5.5, dt));
-      this.camLook.lerp(new THREE.Vector3(carPos.x * 0.92, 1.2, carPos.z - 17), expK(7.5, dt));
+      this.camPos.lerp(this._v1, expK(5.5, dt));
+      this._v2.set(carPos.x * 0.92, 1.2, carPos.z - 17);
+      this.camLook.lerp(this._v2, expK(7.5, dt));
     }
 
     const p = this.camPos, l = this.camLook;
@@ -220,8 +311,10 @@ export class World {
       this.camera.updateProjectionMatrix();
     }
 
-    // keep the shadow frustum near the player
-    this.sun.position.set(carPos.x + 30, 60, carPos.z + 20);
+    // keep the shadow frustum near the player; the offset comes from the
+    // theme's sunRig (sun height/dir per time of day — GRAPHICS_PLAN §1.3)
+    const rig = this.sunRig;
+    this.sun.position.set(carPos.x + rig.x, rig.y, carPos.z + rig.z);
     this.sun.target.position.set(carPos.x, 0, carPos.z - 10);
     this.sun.target.updateMatrixWorld();
 

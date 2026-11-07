@@ -391,8 +391,32 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
 }
 
-/* menu badge: challenge link > touch device > default hint */
-if (CHALLENGE.raceId) {
+/* menu badge: autoshot harness > challenge link > touch device > default hint */
+if (urlParams.get('autoshot')) {
+  /* dev harness (graphics QA loop): /?autoshot=theme-tod&race=<id>&freeze=<sec>
+   * boots one race, freezes it N wall-clock seconds after GO, then signals READY —
+   * a headless browser (--screenshot --virtual-time-budget) captures the frozen view. */
+  const [shotTheme, shotTod] = (urlParams.get('autoshot') || '').split('-');
+  const freezeSec = parseFloat(urlParams.get('freeze') || '10') || 10;
+  if (THEMES[shotTheme]) currentThemeId = shotTheme;
+  if (['day', 'sunset', 'night'].includes(shotTod || '')) settings.timeOfDay = shotTod;
+  (async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    await sleep(300);
+    try { await startRaceFlow(); } catch (e) { document.title = 'AUTOSHOT:ERROR:' + e.message; return; }
+    const t0 = performance.now();
+    while (!(race && race.phase === 'racing') && performance.now() - t0 < 20000) await sleep(100);
+    if (!(race && race.phase === 'racing')) { document.title = 'AUTOSHOT:ERROR:no race'; return; }
+    // advance the race deterministically: simulate exactly freezeSec of race
+    // time in fixed 50ms steps (synchronous — no rAF can interleave), so every
+    // run of the QA loop photographs bots at identical positions.
+    const steps = Math.round((freezeSec * 1000) / 50);
+    for (let i = 0; i < steps; i++) race.update(0.05);
+    world.update(0.05, race.state);
+    race.setPaused(true);
+    document.title = 'AUTOSHOT:READY';
+  })();
+} else if (CHALLENGE.raceId) {
   hud.menuBadge('⚔️ you\'ve been challenged — press START RACE to replay this exact race!');
 } else if (matchMedia('(pointer: coarse)').matches) {
   hud.menuBadge('📱 touch detected — this game plays best with a physical keyboard');

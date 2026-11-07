@@ -25,6 +25,107 @@ export function radialGlowTexture(color = '#ffd9a0') {
   }, 128, 128);
 }
 
+/* Low sun disc for sunset skies — the visible source behind the warm light
+ * (SPEC §2: light must come from a visible source). Position it along the
+ * theme's sunRig direction, fade opacity to 0 outside sunset.
+ * A camera-facing Mesh plane (PlaneGeometry already faces the chase camera):
+ * Sprites proved unreliable to rasterize in this environment (r4), Meshes
+ * render deterministically. Normal-blended hot core + soft corona — pure
+ * additive glow washes out against a bright sunset sky (critic r4). */
+export function makeSunDisc(color = '#ffd9a0') {
+  const tex = canvasTexture((ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+    g.addColorStop(0, '#fff8ec');      // hot core — reads as the disc itself
+    g.addColorStop(0.09, '#fff2d8');
+    g.addColorStop(0.16, color + 'e6'); // warm corona
+    g.addColorStop(0.38, color + '55');
+    g.addColorStop(0.6, color + '18');
+    g.addColorStop(1, color + '00');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  }, 256, 256);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(90, 90),
+    new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0,
+      depthWrite: false, fog: false,
+    })
+  );
+  mesh.renderOrder = 5; // after the sky dome, before HUD-ish overlays
+  return mesh;
+}
+
+/* ---- static scenery merging ----------------------------------------------
+ * This vendored three build never renders InstancedMesh into the shadow depth
+ * pass (a regular Mesh at the same spot casts fine — verified in r4), so all
+ * shadow-casting scenery is merged into single regular Meshes. Merging also
+ * keeps each scenery family at one draw call (GRAPHICS_PLAN §6). */
+
+const _mgV = new THREE.Vector3();
+const _mgN = new THREE.Vector3();
+const _mgM = new THREE.Matrix4();
+const _mgNM = new THREE.Matrix3();
+
+/* parts: [{ geo, matrix }] — emits one non-indexed BufferGeometry with
+ * position/normal/uv, every part pre-transformed by its matrix. */
+function mergeParts(parts) {
+  let total = 0;
+  for (const { geo } of parts) {
+    const vc = geo.attributes.position.count;
+    total += geo.index ? geo.index.count : vc;
+  }
+  const pos = new Float32Array(total * 3);
+  const nor = new Float32Array(total * 3);
+  const uvs = new Float32Array(total * 2);
+  let o = 0;
+  for (const { geo, matrix } of parts) {
+    const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+    const idx = geo.index;
+    const count = idx ? idx.count : p.count;
+    _mgNM.getNormalMatrix(matrix);
+    for (let k = 0; k < count; k++) {
+      const vi = idx ? idx.getX(k) : k;
+      _mgV.fromBufferAttribute(p, vi).applyMatrix4(matrix);
+      pos[(o + k) * 3] = _mgV.x; pos[(o + k) * 3 + 1] = _mgV.y; pos[(o + k) * 3 + 2] = _mgV.z;
+      _mgN.fromBufferAttribute(n, vi).applyMatrix3(_mgNM).normalize();
+      nor[(o + k) * 3] = _mgN.x; nor[(o + k) * 3 + 1] = _mgN.y; nor[(o + k) * 3 + 2] = _mgN.z;
+      if (uv) { uvs[(o + k) * 2] = uv.getX(vi); uvs[(o + k) * 2 + 1] = uv.getY(vi); }
+    }
+    o += count;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  return g;
+}
+
+/* InstancedMesh → one merged geometry (instances baked in local space). */
+export function mergeInstancedGeometry(im) {
+  const parts = [];
+  for (let i = 0; i < im.count; i++) {
+    im.getMatrixAt(i, _mgM);
+    parts.push({ geo: im.geometry, matrix: _mgM.clone() });
+  }
+  return mergeParts(parts);
+}
+
+/* Separate static Meshes → one merged geometry, meshes removed from parent.
+ * Returns the geometry; caller wraps it in a Mesh with the shared material. */
+export function mergeStaticMeshes(meshes) {
+  const parts = [];
+  for (const mesh of meshes) {
+    mesh.updateMatrix();
+    parts.push({ geo: mesh.geometry, matrix: mesh.matrix.clone() });
+  }
+  const g = mergeParts(parts);
+  for (const mesh of meshes) {
+    mesh.parent?.remove(mesh);
+    mesh.geometry.dispose();
+  }
+  return g;
+}
+
 /* name + live wpm label above a vehicle */
 export function makeLabel(name, colorCss) {
   const canvas = document.createElement('canvas');
