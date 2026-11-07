@@ -239,7 +239,7 @@ async function startRaceFlow() {
   hud.setPaused(false);
   hud.showMirror(true);
   world.mirrorEnabled = true;
-  sound.startEngine();
+  sound.startEngine(currentThemeId); // propulsion sound of the chosen theme
 
   phase = 'countdown';
   await countdown();
@@ -382,7 +382,7 @@ requestAnimationFrame(loop);
 /* debug/test handle (also handy in devtools) */
 window.__tr3d = {
   get race() { return race; }, get typing() { return typing; }, get world() { return world; },
-  get settings() { return settings; },
+  get settings() { return settings; }, get sound() { return sound; },
   setPaused, startRaceFlow, backToMenu,
 };
 
