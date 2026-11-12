@@ -22,8 +22,11 @@ export const API = {
     try {
       return await jfetch('api/race' + (qs ? `?${qs}` : ''));
     } catch (e) {
-      if (opts && opts.id) throw e; // a challenge race must be that race — surface the error
-      const demo = demoRace(typeof opts === 'string' ? opts : opts?.avoidId);
+      const id = opts && opts.id;
+      // a challenge race must be that race — surface the error, UNLESS it is a
+      // bundled demo id, which any host (even a static one) can serve exactly
+      if (id && !String(id).startsWith('demo-')) throw e;
+      const demo = demoRace(typeof opts === 'string' ? opts : opts?.avoidId, id);
       demo.fallbackError = e.message;
       return demo;
     }

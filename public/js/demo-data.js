@@ -55,9 +55,13 @@ function synthLog(chars, wpm, rng) {
 
 let lastIdx = -1;
 
-export function demoRace(avoidId) {
+export function demoRace(avoidId, exactId) {
   let idx = (lastIdx + 1) % QUOTES.length;
-  if (avoidId?.startsWith('demo-')) {
+  if (exactId?.startsWith('demo-')) {
+    // challenge link (?race=demo-N): everyone replays the SAME bundled race
+    const want = Number(exactId.slice(5));
+    if (!Number.isNaN(want) && want >= 0 && want < QUOTES.length) idx = want;
+  } else if (avoidId?.startsWith('demo-')) {
     const prev = Number(avoidId.slice(5));
     if (!Number.isNaN(prev)) idx = (prev + 1) % QUOTES.length;
   }
