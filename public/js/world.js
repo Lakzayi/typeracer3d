@@ -62,10 +62,12 @@ export class World {
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     // ortho box around the play corridor + the near scenery band
-    // (GRAPHICS_PLAN §1.3) — keeps 2048² of shadow texels on the action
-    sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
-    sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
-    sun.shadow.camera.near = 10; sun.shadow.camera.far = 180;
+    // (GRAPHICS_PLAN §1.3) — ±48 keeps ~22 texels/m of 2048² on the action AND
+    // covers the near-mid scenery band the chase camera actually sees (the r7
+    // critic's "day scenes have no env-object shadows" was frustum coverage)
+    sun.shadow.camera.left = -48; sun.shadow.camera.right = 48;
+    sun.shadow.camera.top = 48; sun.shadow.camera.bottom = -48;
+    sun.shadow.camera.near = 10; sun.shadow.camera.far = 220;
     sun.shadow.camera.updateProjectionMatrix(); // frustum edits need this or they never apply
     sun.shadow.bias = -0.0002;    // anti shadow-acne
     sun.shadow.normalBias = 0.03; // anti peter-panning on the flat ground

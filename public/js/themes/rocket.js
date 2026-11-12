@@ -230,6 +230,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   );
   strip.rotation.x = -Math.PI / 2;
   strip.position.set(0, 0, -TRACK_LENGTH / 2);
+  strip.receiveShadow = true; // the r9 critic's "no shadow under the rocket" — the strip never received
   group.add(strip);
 
   // lane dashes — muted cyan, reads as paint not neon (critic r1)
@@ -280,6 +281,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   );
   launchGround.rotation.x = -Math.PI / 2;
   launchGround.position.set(0, -14, -TRACK_LENGTH / 2);
+  launchGround.receiveShadow = true;
   group.add(launchGround);
 
   /* ---------- ring gates ---------- */
@@ -433,12 +435,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     dashMat.color.set(name === 'night' ? '#22485a' : '#57909e'); // muted teal paint (r5)
     dashMat.opacity = name === 'night' ? 0.45 : 1.0; // de-neon the lane dashes (r4/r7)
     edgeMat.color.set(name === 'night' ? '#26304a' : '#3a465e'); // rails lit, not self-lit (r7)
-    stripMat.emissiveIntensity = name === 'night' ? 0.12 : 0.5; // highway glows only by day (r6)
+    stripMat.emissiveIntensity = name === 'night' ? 0.32 : 0.5; // corridor must stay readable at night (r9 critic: black void)
     holoMats.forEach((m) => (m.opacity = name === 'night' ? 0.5 : name === 'sunset' ? 0.7 : 0.9));
     sunDisc.material.opacity = name === 'day' ? 0.75 : name === 'sunset' ? 0.6 : 0; // readable source (r7)
     vehicles.forEach((v) => {
       v.jetMat.opacity = tod.plume;
-      v.jetCoreMat.opacity = tod.plume * 0.35; // core keeps color (r6/r7 burn fix)
+      v.jetCoreMat.opacity = tod.plume * 0.55; // core keeps color, reads in daylight (r6/r7 burn fix)
       v.jetColumnMat.opacity = tod.plume * 0.24;
       if (v.smearMat) v.smearMat.opacity = Math.max(0.3, tod.plume * 0.4); // bots read too (r4)
       if (v.light) v.light.intensity = tod.jetLight; // player only — the jet is the lamp

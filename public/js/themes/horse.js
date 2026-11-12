@@ -83,10 +83,10 @@ function buildHorse(color, { player = false } = {}) {
   // tail — fuller fall of hair hanging from the dock (visible below the rump
   // from astern, critic r5)
   const tail = new THREE.Group();
-  const tailUpper = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.6, 0.26), maneMat);
-  tailUpper.geometry.translate(0, -0.26, 0.04);
-  const tailLower = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.8, 0.18), maneMat);
-  tailLower.geometry.translate(0, -0.38, 0.02);
+  const tailUpper = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.72, 0.3), maneMat);
+  tailUpper.geometry.translate(0, -0.32, 0.04);
+  const tailLower = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.24), maneMat);
+  tailLower.geometry.translate(0, -0.45, 0.02);
   tailLower.position.set(0, -0.54, 0.12);
   tailLower.rotation.x = 0.3;
   tailLower.rotation.y = 0.3; // slight twist so hair reads 3D, not a flat quad (critic r7)
@@ -108,9 +108,10 @@ function buildHorse(color, { player = false } = {}) {
   for (const [x, z] of [[-0.38, -0.85], [0.38, -0.85], [-0.38, 0.95], [0.38, 0.95]]) {
     const leg = new THREE.Mesh(upperGeo, coat);
     leg.position.set(x, 1.05, z);
+    leg.rotation.z = x < 0 ? -0.06 : 0.06; // slight outward splay — perfectly vertical pillars read as sticks (r9)
     const lower = new THREE.Mesh(lowerGeo, maneMat); // dark lower = visible joint
     lower.position.set(0, -0.5, 0);
-    lower.rotation.x = 0.3; // standing knee bend so the hoof meets the ground
+    lower.rotation.x = 0.55; // pronounced standing knee bend so the joint breaks the leg line (r9 critic)
     const hoof = new THREE.Mesh(hoofGeo, maneMat);
     hoof.position.set(0, -0.45, 0);
     lower.add(hoof);
@@ -145,7 +146,11 @@ function buildHorse(color, { player = false } = {}) {
 
   // player lantern — real light that lights the trail at night
   const lantern = new THREE.Group();
-  const cage = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.2, 0.14), new THREE.MeshBasicMaterial({ color: '#ffb84d' }));
+  // dark lantern housing with a TOD-tied emissive core — a Basic yellow box
+  // stayed sun-bright even at noon, reading as a floating yellow quad beside
+  // the flank (r9 critic)
+  const cage = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.2, 0.14),
+    new THREE.MeshStandardMaterial({ color: '#4a3d2e', roughness: 0.7, emissive: '#ffb84d', emissiveIntensity: 0 }));
   const lanternLight = new THREE.PointLight('#ffbb55', 0, 9, 2);
   lantern.add(cage, lanternLight);
   lantern.position.set(-0.42, 2.15, 0.4);
@@ -513,6 +518,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       // poles and campfires only (critic r5: player halo had no visible source)
       v.lanternLight.intensity = 0;
       v.cage.visible = true; // small visible lantern prop, emits nothing
+      v.cage.material.emissiveIntensity = tod.lanterns * 1.4; // glows only when it's actually dark (r9)
       // rider albedo dims with the TOD: a bright mustard shirt + skin glowed
       // against the near-black horse at night (critic r7) — cold dim fill
       const riderK = name === 'night' ? 0.3 : name === 'sunset' ? 0.65 : 1.0;

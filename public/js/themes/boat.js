@@ -26,12 +26,14 @@ const TOD = {
     // r7: sun/hemi less saturated so shadowed sand/rocks stay cool instead of
     // everything reading as one orange filter
     skyTop: '#3a2a4a', skyMid: '#e8874a', skyBot: '#ffb26a', skyLow: '#ffc98a',
-    fogDensity: 0.0028, exposure: 0.85,
+    // deeper terracotta haze, and thinner than r8: the bright horizon band as
+    // fog painted every midground object the same pastel orange (r9 critic)
+    fog: '#e09a66', fogDensity: 0.0021, exposure: 0.85,
     // sun just over the canyon rim: elevation ~8° (critic r6: sun sat too high)
     sunRig: [-28, 8, -52],
     sunColor: '#ffb87c', sunIntensity: 1.6,
     hemiSky: '#c9a8b8', hemiGround: '#33302e', hemiIntensity: 0.36,
-    ambient: 0.0, lanterns: 0.6, stars: 0.25, water: '#5c4a44', waterEnv: 2.0, navLights: 0.8,
+    ambient: 0.0, lanterns: 0.6, stars: 0.25, water: '#4a4347', waterEnv: 2.0, navLights: 0.8,
     headlight: 14,
   },
   night: {
@@ -244,7 +246,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // §4 water: low roughness + real metalness so the sky env actually mirrors
   // (critic r4/r5: flat turquoise with painted stains). r7: roughness 0.07 so
   // the env sun-blob gives a visible glint (env alone = gradient = invisible)
-  const waterMat = new THREE.MeshStandardMaterial({ color: tod.water, roughness: 0.07, metalness: 0.18, map: waterTex, envMapIntensity: tod.waterEnv });
+  // r9: metalness 0.5 — from the chase cam the water is seen from ABOVE, where
+  // a dielectric's Fresnel reflectance collapses to ~4% and the env never shows
+  // no matter how low the roughness; half-metal keeps the mirror at every angle
+  const waterMat = new THREE.MeshStandardMaterial({ color: tod.water, roughness: 0.07, metalness: 0.5, map: waterTex, envMapIntensity: tod.waterEnv });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(14.6, TRACK_LENGTH + 200), waterMat);
   water.receiveShadow = true;
   water.rotation.x = -Math.PI / 2;
@@ -492,7 +497,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     sky.material.map.needsUpdate = true;
 
     // fog fades to the horizon band of the sky (GRAPHICS_PLAN §1.4)
-    world.setFog(tod.skyBot, tod.fogDensity);
+    // fog can sit deeper than the sky's horizon band: a pastel-bright horizon
+    // color AS fog veils the whole midground uniformly (r9 critic: sunset read
+    // as one global orange filter) — themes may override with tod.fog
+    world.setFog(tod.fog ?? tod.skyBot, tod.fogDensity);
     world.scene.background.set(tod.skyBot);
     world.setExposure(tod.exposure);
     // env gets the sun blob so the water shows a real specular glint at the
@@ -556,9 +564,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       if (!v) return;
       const { s01 } = stepVehicle(v, rs, dt, now, { bobAmp: 0.1, bobFreq: 55 });
 
-      // wake grows with speed (small idle wake so a stopped boat still reads
-      // as sitting IN water); combo spray bursts with heat
-      v.wakeMat.opacity = Math.max(0.04, Math.min(0.38, s01 * 0.42));
+      // wake grows with speed; a real boat idles with a visible wash even
+      // stopped (0.16 floor so a stationary boat still reads as IN water)
+      v.wakeMat.opacity = Math.max(0.16, Math.min(0.42, s01 * 0.42));
       v.wake.scale.set(0.8 + s01 * 0.6, 0.6 + s01 * 1.1, 1);
       const heat = rs.comboHeat ?? 0;
       const flicker = 0.8 + Math.random() * 0.35;
