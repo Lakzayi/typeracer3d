@@ -15,12 +15,16 @@ function upperBound(arr, x) {
 }
 
 export class RaceController {
-  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing }) {
+  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic' }) {
     this.race = race;
     this.world = world;
     this.sound = sound;
     this.hud = hud;
     this.typing = typing;
+    this.mode = mode;
+    this.deadly = mode === 'death';   // one mistake ends the run
+    this.solo = mode === 'single' || mode === 'practice'; // no opponents on track
+    this.died = false;
     this.textLen = race.text.length;
     this.phase = 'ready'; // ready -> racing -> finished
     this.paused = false;
@@ -86,7 +90,24 @@ export class RaceController {
   notifyError() {
     const s = this.state[0];
     s.errorT = 0.3;
-    this.world.shake(0.8);
+    this.world.shake(this.deadly ? 2.4 : 0.8);
+    if (this.deadly && this.phase === 'racing' && !this.racers[0].finished) this._playerDied();
+  }
+
+  /* death mode — the first mistake is fatal: the car coasts to a stop and the
+   * results drop in almost immediately (bots keep racing without you) */
+  _playerDied() {
+    this.died = true;
+    const p = this.racers[0];
+    p.finished = true;
+    p.finishTime = this.raceTime;
+    this.state[0].finishT = this.raceTime;
+    this.typing.disable();
+    this.sound.stopEngine();
+    this.sound.die();
+    this.world.shake(2.4);
+    clearTimeout(this.endTimer);
+    this.endTimer = setTimeout(() => this._finalize(), 1100);
   }
 
   update(dt) {
@@ -125,8 +146,8 @@ export class RaceController {
       this._onPlayerFinish();
     }
 
-    // everyone done? wrap up immediately
-    if (p.finished && this.racers.every((r) => r.isPlayer || r.finished)) this._finalize();
+    // everyone done? wrap up immediately (solo modes celebrate a moment first)
+    if (!this.solo && p.finished && this.racers.every((r) => r.isPlayer || r.finished)) this._finalize();
 
     this._refreshState(dt);
   }
@@ -137,8 +158,8 @@ export class RaceController {
     this.world.finishMode = true;
     this.world.focusIdx = 0;
     this.world.confettiBurst(this.world.theme.vehicles[0].group.position);
-    // let stragglers finish (or cut it short)
-    this.endTimer = setTimeout(() => this._finalize(), 6000);
+    // let stragglers finish (or cut it short — solo has nobody to wait for)
+    this.endTimer = setTimeout(() => this._finalize(), this.solo ? 2600 : 6000);
   }
 
   _finalize() {
@@ -159,7 +180,11 @@ export class RaceController {
       return b.progress01 - a.progress01;
     });
     rows.forEach((r, i) => { r.place = i + 1; });
-    this.results = { rows, factor: this.factor, raceId: this.race.id, live: this.race.live };
+    this.results = {
+      rows, factor: this.factor, raceId: this.race.id, live: this.race.live,
+      mode: this.mode,
+      died: this.died ? { progress01: rows.find((r) => r.isPlayer).progress01 } : null,
+    };
     this.hud.onResults(this.results);
   }
 
@@ -179,7 +204,7 @@ export class RaceController {
       s.finished = r.finished || s.progress01 >= 1;
       if (r.isPlayer) {
         s.wpm = this.typing.recentWpm();
-        s.speed01 = Math.min(1, s.wpm / 130);
+        s.speed01 = this.died ? 0 : Math.min(1, s.wpm / 130); // dead car coasts to a stop
         s.comboHeat = this.comboHeat;
         if (s.finished && s.finishT == null) s.finishT = this.typing.elapsedSec();
       } else {

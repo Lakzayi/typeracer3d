@@ -21,6 +21,7 @@ let phase = 'menu'; // menu | countdown | racing | finished
 let currentThemeId = 'car';
 let stats = null; // loaded TypeRacer profile
 let lastRaceId = null;
+let lastPracticeId = null;
 
 /* ---------------- settings ---------------- */
 
@@ -158,10 +159,16 @@ async function startRaceFlow() {
   hud.setStartBusy(true, '⏳ fetching a real race…');
   hud.menuBadge('connecting to play.typeracer.com…');
 
+  const mode = $('gameMode').value;
+  const solo = mode === 'single' || mode === 'practice';
+  $('difficulty').disabled = solo; // no bots — opponent pace is meaningless
   let raceData;
   const challengeAttempt = CHALLENGE.raceId;
   try {
-    if (challengeAttempt) {
+    if (mode === 'practice') {
+      hud.menuBadge('🧘 loading a Monkeytype quote…');
+      raceData = await API.practice(lastPracticeId);
+    } else if (challengeAttempt) {
       hud.menuBadge('⚔️ loading the challenged race…');
       raceData = await API.race({ id: challengeAttempt }); // throws if it no longer exists
     } else {
@@ -182,6 +189,8 @@ async function startRaceFlow() {
     }
   }
   lastRaceId = raceData.id;
+  if (mode === 'practice') lastPracticeId = raceData.id;
+  if (solo) raceData = { ...raceData, racers: [], solo: true }; // solo — nobody else on the grid
   if (raceData.demo) {
     hud.menuBadge('🧪 demo race — start the local server (node server.js) to race real TypeRacer data');
   }
@@ -229,7 +238,7 @@ async function startRaceFlow() {
 
   // --- controller ---
   if (race) race.dispose();
-  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing });
+  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode });
 
   // --- hud ---
   const colors = racers.map((r, i) => theme.vehicles[i]?.color ?? '#2e86ff');
@@ -315,7 +324,9 @@ $('shareBtn').addEventListener('click', async () => {
   const url = new URL(location.href);
   url.search = '';
   const q = new URLSearchParams();
-  if (lastResults.raceId) q.set('race', lastResults.raceId);
+  const shareMode = $('gameMode').value;
+  if (lastResults.raceId && shareMode !== 'practice') q.set('race', lastResults.raceId);
+  if (shareMode !== 'classic') q.set('mode', shareMode);
   q.set('theme', currentThemeId);
   q.set('tod', settings.timeOfDay);
   const diff = $('difficulty').value;
@@ -400,6 +411,11 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     if (phase === 'menu') location.reload();
     else hud.toast('🔄 new version ready — applies when you return to the menu', 3200);
   });
+}
+
+/* challenge links carry the mode — preselect it before the user hits start */
+if (['single', 'practice', 'death'].includes(urlParams.get('mode'))) {
+  $('gameMode').value = urlParams.get('mode');
 }
 
 /* menu badge: autoshot harness > challenge link > touch device > default hint */

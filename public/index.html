@@ -113,6 +113,16 @@
       <section class="setup glass">
         <div class="setupGrid">
           <div class="setupRow">
+            <label>Game mode</label>
+            <select id="gameMode">
+              <option value="classic" selected>🏁 Classic — race real TypeRacer racers</option>
+              <option value="single">🕹️ Single — solo time trial</option>
+              <option value="practice">🧘 Practice — Monkeytype quotes, no pressure</option>
+              <option value="death">💀 Death — one mistake and you're out</option>
+            </select>
+          </div>
+
+          <div class="setupRow">
             <label>Your TypeRacer username <span class="opt">optional — race as yourself</span></label>
             <div class="userRow">
               <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>

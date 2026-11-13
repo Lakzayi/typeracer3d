@@ -53,7 +53,13 @@ export class HUD {
 
   setDataBadge(race) {
     const el = this.els.dataBadge;
-    if (race.live) {
+    if (race.practice) {
+      el.classList.remove('orange');
+      el.innerHTML = `🧘 <b>practice</b> · ${race.source || 'Monkeytype'} · no opponents, no stakes`;
+    } else if (race.solo) {
+      el.classList.remove('orange');
+      el.innerHTML = `🕹️ <b>single</b> · time trial · quote from a real TypeRacer race${race.id ? ` ${race.id}` : ''} — no opponents`;
+    } else if (race.live) {
       const src = race.source ? ` · ${race.source.medium}${race.source.author ? ' — ' + race.source.author : ''}` : '';
       el.classList.remove('orange');
       el.innerHTML = `🟢 <b>live data</b> · real TypeRacer race ${race.id || ''} · ${race.racers.length} real racer(s)${src}`;
@@ -220,8 +226,18 @@ export class HUD {
   onResults(results) {
     const { rows } = results;
     const me = rows.find((r) => r.isPlayer);
-    const medal = ['🥇', '🥈', '🥉'][me.place - 1] ?? '🏁';
-    this.els.resPlace.innerHTML = `${medal} ${ORD[me.place - 1] ?? me.place + 'th'}<small>${me.place === 1 ? 'you won the race!' : 'race complete'}</small>`;
+    let head;
+    if (results.died) {
+      head = `💀 died at ${Math.round(results.died.progress01 * 100)}%<small>death mode — one mistake ends the run</small>`;
+    } else if (results.mode === 'practice') {
+      head = `🧘 practice complete<small>${results.raceId && results.raceId.startsWith('mt-') ? 'quote from Monkeytype' : 'bundled quote (offline)'} — no stakes</small>`;
+    } else if (results.mode === 'single') {
+      head = `🏁 solo run complete<small>time trial — you were the only one on track</small>`;
+    } else {
+      const medal = ['🥇', '🥈', '🥉'][me.place - 1] ?? '🏁';
+      head = `${medal} ${ORD[me.place - 1] ?? me.place + 'th'}<small>${me.place === 1 ? 'you won the race!' : 'race complete'}</small>`;
+    }
+    this.els.resPlace.innerHTML = head;
     this.els.resStats.innerHTML = `
       <div><b>${Math.round(me.wpm)}</b><label>wpm</label></div>
       <div><b>${me.acc.toFixed(1)}%</b><label>accuracy</label></div>
@@ -233,9 +249,11 @@ export class HUD {
         <span class="rwm">${Math.round(r.wpm)} wpm</span>
         <span class="rac">${r.acc.toFixed(1)}%</span>
       </div>`).join('') +
-      (results.factor && Math.abs(results.factor - 1) > 0.03
-        ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
-        : `<div class="real">bots ran at the real race speeds</div>`);
+      (results.mode === 'single' || results.mode === 'practice'
+        ? ''
+        : (results.factor && Math.abs(results.factor - 1) > 0.03
+          ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
+          : `<div class="real">bots ran at the real race speeds</div>`));
     this.showResults();
   }
 

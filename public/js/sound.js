@@ -235,4 +235,20 @@ export class Sound {
     [523, 659, 784, 1046].forEach((f, i) =>
       setTimeout(() => this._blip(f, 0.22, 'triangle', 0.05), i * 110));
   }
+
+  /* death mode — the run ends: descending crunch that dies at the bottom */
+  die() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.5);
+    gain.gain.setValueAtTime(0.4, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    osc.connect(gain).connect(this.ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.6);
+  }
 }
