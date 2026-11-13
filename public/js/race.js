@@ -57,16 +57,19 @@ export class RaceController {
       racingAs: replaced ? replaced.name : null,
     });
     for (const r of race.racers) {
-      if (this.racers.length > MAX_BOTS) break;
+      if (this.racers.length > MAX_BOTS && !r.isGhost) break;
       if (replaced && r.name === replaced.name) continue;
-      const jitter = 0.94 + rng() * 0.12;
-      const wpm = Math.max(8, (r.wpm || 60) * factor * jitter);
+      const isGhost = !!r.isGhost;
+      const jitter = isGhost ? 1 : 0.94 + rng() * 0.12;
+      const wpm = isGhost ? (r.wpm || 60) : Math.max(8, (r.wpm || 60) * factor * jitter);
       this.racers.push({
         name: r.name, isPlayer: false, color: '#888',
+        isGhost,
         realWpm: r.wpm, realAcc: r.acc, log: r.log || null,
-        rate: factor * jitter, wpm,
+        rate: isGhost ? 1 : factor * jitter, // the ghost replays YOUR exact timing
+        wpm,
         phase: rng() * 10, phase2: rng() * 10,
-        stumbles: Array.from({ length: 1 + Math.floor(rng() * 2) }, () => ({
+        stumbles: isGhost ? [] : Array.from({ length: 1 + Math.floor(rng() * 2) }, () => ({
           at: 0.2 + rng() * 0.6, dur: 0.3 + rng() * 0.6,
         })),
         estDur: this.textLen / (wpm * 5 / 60),

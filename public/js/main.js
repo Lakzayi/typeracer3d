@@ -11,8 +11,11 @@ import { HUD } from './hud.js';
 import { Sound } from './sound.js';
 import { MODES, SOLO_MODES, REAL_DATA_MODES, SHAREABLE_RACE_MODES } from './modes.js';
 import { drillRace } from './drills.js';
-import { recordRace, renderStatsPanel, resetStats } from './stats.js';
+import { recordRace, renderStatsPanel, resetStats, localStatsSummary } from './stats.js';
 import { demoRace } from './demo-data.js';
+import { getGhost, maybeSaveGhost, ghostLogFor } from './ghost.js';
+import { dailyRace, dailyState, markDailyDone, todayStr } from './daily.js';
+import { check as checkAchievements, renderAchievements } from './achievements.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,7 +34,7 @@ let lastPracticeId = null;
 
 const SETTINGS_KEY = 'tr3d_settings_v1';
 const settings = Object.assign(
-  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true },
+  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, ghostOn: false },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
 );
 
@@ -122,7 +125,7 @@ function buildModeCards() {
 }
 
 function setMode(mode) {
-  if (!MODES[mode]) return;
+  if (!MODES[mode] && mode !== 'daily') return; // daily lives on the banner, not a card
   $('gameMode').value = mode;
   settings.mode = mode;
   saveSettings();
@@ -139,10 +142,48 @@ function syncModeRows() {
   $('botRow').hidden = mode !== 'bot';
   $('drillRow').hidden = mode !== 'drill';
   $('customRow').hidden = mode !== 'custom';
+  // the ghost toggle appears in every mode you personally type in, once a
+  // ghost exists (bot battle included — race your pace against your bots)
+  $('ghostRow').hidden = !getGhost() || mode === 'daily';
+  $('ghostToggle').setAttribute('aria-pressed', String(settings.ghostOn));
+  $('ghostLabel').textContent = settings.ghostOn
+    ? `on — ${getGhost().wpm} wpm ghost on track`
+    : 'off';
 }
+
+/* personal ghost — injected as an extra racer that replays your best run */
+function ghostRacer(textLen) {
+  if (!settings.ghostOn) return null;
+  const g = getGhost();
+  if (!g) return null;
+  return { name: '👻 your best', isGhost: true, wpm: g.wpm, acc: g.acc, log: ghostLogFor(textLen) };
+}
+
+/* ---------------- daily challenge banner ---------------- */
+
+function renderDaily() {
+  const s = dailyState();
+  $('dailyDate').textContent = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  $('dailyStreak').textContent = `🔥 ${s.streak}`;
+  $('dailyState').textContent = s.doneToday
+    ? `✓ done today — ${s.todayWpm} wpm · best streak ${s.best}`
+    : `not done today — one seeded race, same for everyone · best streak ${s.best}`;
+}
+$('dailyBanner').addEventListener('click', () => {
+  setMode('daily');
+  startRaceFlow();
+});
 
 $('resetStats').addEventListener('click', () => {
   if (confirm('Clear your local race history?')) { resetStats(); renderStatsPanel(); }
+});
+
+$('ghostToggle').addEventListener('click', () => {
+  settings.ghostOn = !settings.ghostOn;
+  saveSettings();
+  syncModeRows();
+  const g = getGhost();
+  if (settings.ghostOn && g) hud.toast(`👻 your ${g.wpm} wpm ghost joins the next race`, 2200);
 });
 
 $('loadStats').addEventListener('click', async () => {
@@ -218,6 +259,10 @@ async function startRaceFlow() {
     if (mode === 'practice') {
       hud.menuBadge('🧘 loading a Monkeytype quote…');
       raceData = await API.practice(lastPracticeId);
+    } else if (mode === 'daily') {
+      hud.setStartBusy(true, '⏳ setting up today’s challenge…');
+      hud.menuBadge('📅 rolling today’s seeded race…');
+      raceData = await dailyRace();
     } else if (mode === 'drill') {
       hud.menuBadge(`🎯 ${$('drillType').value} drill — generating…`);
       raceData = drillRace($('drillType').value);
@@ -268,6 +313,16 @@ async function startRaceFlow() {
   if (solo) raceData = { ...raceData, racers: [], solo: true, kind: mode }; // solo — nobody else on the grid
   if (raceData.demo && mode !== 'bot') {
     hud.menuBadge('🧪 demo race — start the local server (node server.js) to race real TypeRacer data');
+  }
+
+  // personal ghost — one extra racer replaying your best run's exact pace
+  // (bots capped at 3 so the 5-lane track fits: you + 3 bots + ghost)
+  ghostWasRacing = false; ghostWpmAtStart = 0;
+  const gR = ghostRacer(raceData.text.length);
+  if (gR) {
+    raceData = { ...raceData, racers: [...raceData.racers.slice(0, 3), gR] };
+    ghostWasRacing = true;
+    ghostWpmAtStart = gR.wpm;
   }
 
   const difficulty = mode === 'bot' ? 'real' : $('difficulty').value; // bots run at YOUR configured pace
@@ -366,10 +421,41 @@ hud.els.typingPanel.addEventListener('click', () => typing && typing.focus());
 
 const PB_KEY = 'tr3d_best_v1';
 let lastResults = null;
+let ghostWasRacing = false;
+let ghostWpmAtStart = 0;
 const origOnResults = hud.onResults.bind(hud);
 hud.onResults = (results) => {
+  // ghost bookkeeping — save a new ghost, detect a slayed ghost (BEFORE the
+  // hud renders, so the results head can carry the streak)
+  const meRow = results.rows.find((r) => r.isPlayer);
+  let ghostBeaten = false;
+  if (meRow && meRow.progress01 >= 1) {
+    ghostBeaten = ghostWasRacing && meRow.wpm > ghostWpmAtStart;
+    if (maybeSaveGhost({ hits: typing.hits, startedAt: typing.startedAt, wpm: meRow.wpm, acc: meRow.acc, mode: results.mode }) && ghostWasRacing) {
+      setTimeout(() => hud.toast(`👻 your ghost just got faster — ${Math.round(meRow.wpm)} wpm`, 2400), 2600);
+    }
+  }
+
+  // daily streak
+  let streak = dailyState().streak;
+  if (results.mode === 'daily' && meRow && meRow.progress01 >= 1) {
+    streak = markDailyDone(meRow.wpm);
+    renderDaily();
+    results.dailyStreak = streak;
+  }
+
   origOnResults(results);
   recordRace(results); // local stats — every run counts, even a death run
+
+  // achievements — toast each unlock
+  const fresh = checkAchievements(results, {
+    maxCombo: typing.maxCombo,
+    ghostWasRacing, ghostBeaten, streak,
+    ...localStatsSummary(),
+  });
+  fresh.forEach((def, i) => setTimeout(() => hud.toast(`🏅 unlocked — ${def.icon} ${def.name}`, 2200), 400 + i * 2300));
+  if (fresh.length) renderAchievements();
+
   renderStatsPanel();
   lastResults = results;
   phase = 'finished';
@@ -473,6 +559,8 @@ function loop(t) {
 applySettingsToUI();
 buildThemeCards();
 renderStatsPanel();
+renderAchievements();
+renderDaily();
 requestAnimationFrame(loop);
 
 /* debug/test handle (also handy in devtools) */
@@ -500,8 +588,9 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 /* challenge links carry the mode (+ its params) — preselect before START.
  * Otherwise restore the mode the player left off on. */
 const pm = urlParams.get('mode');
-if (pm && MODES[pm]) setMode(pm);
-else if (settings.mode && MODES[settings.mode]) setMode(settings.mode);
+if (pm === 'daily') setMode('daily');
+else if (pm && MODES[pm]) setMode(pm);
+else if (settings.mode && (MODES[settings.mode] || settings.mode === 'daily')) setMode(settings.mode);
 else { buildModeCards(); syncModeRows(); }
 if (urlParams.get('bots')) $('botCount').value = String(Math.max(1, Math.min(4, parseInt(urlParams.get('bots'), 10) || 2)));
 if (urlParams.get('bwpm')) $('botWpm').value = String(Math.max(20, Math.min(200, parseFloat(urlParams.get('bwpm')) || 70)));

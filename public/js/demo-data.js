@@ -40,7 +40,7 @@ const QUOTES = [
 ];
 
 /* synthetic cumulative keystroke timestamps (ms) for `chars` chars at `wpm` */
-function synthLog(chars, wpm, rng) {
+export function synthLog(chars, wpm, rng) {
   const base = 60000 / (wpm * 5); // ms per character
   let t = 0;
   const log = [];

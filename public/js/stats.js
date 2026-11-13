@@ -55,6 +55,12 @@ export function resetStats() {
   try { localStorage.removeItem(KEY); } catch (e) {}
 }
 
+/* totals for the achievements checker */
+export function localStatsSummary() {
+  const s = load();
+  return { totalRaces: s.races, modesPlayed: new Set(s.hist.map((e) => e.mode)) };
+}
+
 export function renderStatsPanel() {
   const cards = document.getElementById('statsCards');
   const recent = document.getElementById('recentRuns');

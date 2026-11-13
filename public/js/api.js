@@ -18,7 +18,7 @@ const MT_QUOTES_URL = 'https://raw.githubusercontent.com/monkeytypegame/monkeyty
 const MT_CACHE_KEY = 'tr3d-mt-quotes';
 const MT_TTL = 7 * 24 * 3600 * 1000; // one week
 
-async function monkeytypeQuotes() {
+export async function monkeytypeQuotes() {
   try {
     const raw = localStorage.getItem(MT_CACHE_KEY);
     if (raw) {

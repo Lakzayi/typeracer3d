@@ -67,6 +67,9 @@ export class HUD {
       const mid = wpms[Math.floor(wpms.length / 2)] || 70;
       el.classList.remove('orange');
       el.innerHTML = `🤖 <b>bot battle</b> · ${race.racers.length} bot${race.racers.length > 1 ? 's' : ''} @ ~${Math.round(mid)} wpm · your pace, your fight`;
+    } else if (race.daily) {
+      el.classList.remove('orange');
+      el.innerHTML = `📅 <b>daily challenge</b> · ${race.id.replace('daily-', '')} · same quote, same bots for everyone today`;
     } else if (race.solo) {
       el.classList.remove('orange');
       el.innerHTML = `🕹️ <b>single</b> · time trial · quote from a real TypeRacer race${race.id ? ` ${race.id}` : ''} — no opponents`;
@@ -250,6 +253,9 @@ export class HUD {
       head = `📝 custom run complete<small>your own text — solo practice</small>`;
     } else if (results.mode === 'single') {
       head = `🏁 solo run complete<small>time trial — you were the only one on track</small>`;
+    } else if (results.mode === 'daily') {
+      const streak = results.dailyStreak ?? 1;
+      head = `📅 daily complete<small>🔥 ${streak}-day streak · everyone raced this exact race today</small>`;
     } else {
       const medal = ['🥇', '🥈', '🥉'][me.place - 1] ?? '🏁';
       head = `${medal} ${ORD[me.place - 1] ?? me.place + 'th'}<small>${me.place === 1 ? 'you won the race!' : 'race complete'}</small>`;
@@ -270,9 +276,11 @@ export class HUD {
         ? ''
         : results.mode === 'bot'
           ? `<div class="real">synthetic bots — at the pace you configured</div>`
-          : (results.factor && Math.abs(results.factor - 1) > 0.03
-            ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
-            : `<div class="real">bots ran at the real race speeds</div>`));
+          : results.mode === 'daily'
+            ? `<div class="real">seeded bots — identical for every player today</div>`
+            : (results.factor && Math.abs(results.factor - 1) > 0.03
+              ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
+              : `<div class="real">bots ran at the real race speeds</div>`));
     this.showResults();
   }
 

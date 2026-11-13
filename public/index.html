@@ -110,6 +110,17 @@
 
       <div id="themeCards" class="themeGrid"></div>
 
+      <!-- daily challenge — one seeded race per day, same for everyone -->
+      <button id="dailyBanner" class="glass dailyBanner" type="button">
+        <span class="dIc">📅</span>
+        <span class="dTx">
+          <b>daily challenge <span id="dailyDate"></span></b>
+          <small id="dailyState">loading…</small>
+        </span>
+        <span class="dStreak" id="dailyStreak">🔥 0</span>
+        <span class="dGo">RACE ▸</span>
+      </button>
+
       <section class="setup glass">
         <div class="setupGrid">
           <div class="setupRow setupRowWide">
@@ -124,6 +135,7 @@
               <option value="bot">🤖 Bot battle</option>
               <option value="drill">🎯 Drill</option>
               <option value="custom">📝 Custom text</option>
+              <option value="daily">📅 Daily challenge</option>
             </select>
           </div>
 
@@ -153,6 +165,14 @@
           <div class="setupRow" id="customRow" hidden>
             <label>Your text <span class="opt">20–600 characters</span></label>
             <textarea id="customText" rows="3" placeholder="paste anything — lyrics, homework, docs…"></textarea>
+          </div>
+
+          <div class="setupRow" id="ghostRow" hidden>
+            <label>Personal ghost <span class="opt">race your own best run</span></label>
+            <button id="ghostToggle" class="ghostToggle" type="button" aria-pressed="false">
+              <span class="gTrack"><span class="gKnob"></span></span>
+              <span class="gLabel" id="ghostLabel">off</span>
+            </button>
           </div>
 
           <div class="setupRow" id="usernameRow">
@@ -208,6 +228,15 @@
         <div id="recentRuns" class="recentRuns"></div>
       </section>
 
+      <!-- achievements — 12 medals, unlocked by playing -->
+      <section id="achvPanel" class="glass statsPanel">
+        <div class="sectionHead">
+          <h2>🏅 achievements</h2>
+          <span id="achvCount" class="achvCount">0/12</span>
+        </div>
+        <div id="achvGrid" class="achvGrid"></div>
+      </section>
+
       <details class="help glass">
         <summary>❓ how to play, modes &amp; tips</summary>
         <div class="helpBody">
@@ -225,6 +254,10 @@
             <li>🎯 <b>drill</b> — aim trainers: common words, numbers &amp; symbols, or JavaScript code. Solo, works offline.</li>
             <li>📝 <b>custom</b> — paste any text (lyrics, homework, docs) and race through it.</li>
           </ul>
+          <h3>ghost &amp; daily</h3>
+          <p>👻 <b>Personal ghost</b> — after your first full run, a toggle appears: your fastest run returns as a
+            translucent rival in any race. Beat it and it gets faster. 📅 <b>Daily challenge</b> — one seeded race per day,
+            identical for every player worldwide. Keep the 🔥 streak alive.</p>
           <h3>tips</h3>
           <p>Accuracy beats raw speed — every mistake costs a backspace trip. Chain 10+ correct keys for a 🔥 combo.
             In <b>death</b> mode, typing at ~90% of your top speed survives much longer than full send.</p>
