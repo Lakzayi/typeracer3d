@@ -98,7 +98,7 @@ body {
 /* ─────────────────────────────── HUD ──────────────────────────────────── */
 
 #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-variant-numeric: tabular-nums; }
-#hud button, #typingPanel { pointer-events: auto; }
+#hud button, #typingPanel, #pauseOverlay { pointer-events: auto; }
 
 #dataBadge {
   position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
