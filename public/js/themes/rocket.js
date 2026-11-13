@@ -17,11 +17,17 @@ const TOD = {
     // sun forward-upper-left (rig z<0 = in frame above the horizon) so the
     // disc is visible AND the asteroid lit-faces/shadow agree with it
     // (critic r7). y=14 keeps the disc clear of the top edge.
+    // r13 (MED #3 again — the r12 render still read env-lit from the wrong
+    // side): azimuth pushed more LATERAL (-38,-42) so the left limb catches
+    // direct sun from a steeper side angle, envSun 1.0→0.62 (the sky-mirror
+    // was the brightest thing on the body), sun 3.4→3.8 with shell env
+    // 0.55→0.38, and hemi up 0.5→0.58 so the shadow side stays filled blue
+    // rather than dead — the LIT/SHADOW contrast now comes from the SUN
     bg: '#b8d4ea', fogDensity: 0.0016, exposure: 1.08,
     skyTop: '#1e56b0', skyMid: '#4f86c0', skyBot: '#b8d4ea',
-    sunRig: [-34, 14, -46], sunDisc: 1.2, envSun: 1.0,
-    sunColor: '#fffbe8', sunIntensity: 3.0,
-    hemiSky: '#b8dcff', hemiGround: '#5a6048', hemiIntensity: 0.5,
+    sunRig: [-38, 15, -42], sunDisc: 1.2, envSun: 0.62,
+    sunColor: '#fffbe8', sunIntensity: 3.8,
+    hemiSky: '#b8dcff', hemiGround: '#5a6048', hemiIntensity: 0.58,
     ambient: 0.05, stars: 0.0, rings: 1.0, glow: 0.6, jetLight: 26, plume: 0.85,
   },
   sunset: {
@@ -35,13 +41,15 @@ const TOD = {
   night: {
     // r10 #5: engine-bell/fin rims glowed hotter than physical — envSun 0.12
     // (dim moon glint) + jetLight 42→34 keeps the plume readable without the
-    // rim-lit halo
+    // rim-lit halo. r12 (LOW #12: fin OUTER faces still too bright/saturated):
+    // jetLight 34→18 AND the accent paint itself dims to 0.5 at night —
+    // moonlight alone never renders a saturated red
     bg: '#04060f', fogDensity: 0.0016, exposure: 0.6,
     skyTop: '#01030a', skyMid: '#04060f', skyBot: '#0a1226',
     sunRig: [-30, 20, 50], sunDisc: 0, envSun: 0.12,
     sunColor: '#8fa8ff', sunIntensity: 0.9,
     hemiSky: '#2c4a70', hemiGround: '#0a0f18', hemiIntensity: 0.65,
-    ambient: 0.06, stars: 1.0, rings: 1.4, glow: 1.0, jetLight: 34, plume: 0.65,
+    ambient: 0.06, stars: 1.0, rings: 1.4, glow: 1.0, jetLight: 18, plume: 0.65,
   },
 };
 
@@ -72,91 +80,178 @@ function earthTexture() {
   }, 512, 256);
 }
 
+/* rocket shell panel map — u wraps the body (8 panel seams), v runs engine →
+ * nose tip: faint vertical seams, three weld rings, soot wash at the engine
+ * end and light weathering streaks. Zero files, real surface break-up. */
+function rocketPanelTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#f1f3f5';
+  ctx.fillRect(0, 0, 256, 256);
+  // subtle tonal mottling per panel
+  for (let p = 0; p < 8; p++) {
+    ctx.fillStyle = `rgba(${p % 2 ? 210 : 225}, ${p % 2 ? 214 : 228}, ${p % 2 ? 220 : 232}, 0.25)`;
+    ctx.fillRect(p * 32, 0, 32, 256);
+  }
+  // panel seams (vertical in v-space → rings around the body)
+  ctx.fillStyle = 'rgba(70,76,84,0.5)';
+  for (let p = 0; p <= 8; p++) ctx.fillRect(p * 32 - 1, 30, 1.6, 200);
+  // weld rings at three stations
+  for (const y of [70, 130, 180]) ctx.fillRect(0, y, 256, 2);
+  // soot wash at the engine end (v near 0 = canvas bottom? v=0 at profile start
+  // = rear/engine side; canvas y is flipped vs v — soot at BOTTOM of canvas)
+  const soot = ctx.createLinearGradient(0, 256, 0, 215);
+  soot.addColorStop(0, 'rgba(30,30,32,0.55)');
+  soot.addColorStop(1, 'rgba(30,30,32,0)');
+  ctx.fillStyle = soot;
+  ctx.fillRect(0, 215, 256, 41);
+  // weathering streaks running down the body
+  for (let i = 0; i < 40; i++) {
+    ctx.fillStyle = `rgba(120,124,130,${0.05 + Math.random() * 0.09})`;
+    ctx.fillRect(Math.random() * 256, 40 + Math.random() * 150, 1 + Math.random() * 2, 20 + Math.random() * 60);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/* soft venting-vapor alpha: streaked along the flow (v), soft at the cylinder
+ * silhouette (sin(π·u) kills the hard shell edges from every view direction),
+ * fading out toward the far end — replaces the crisp chevron cones (r11 #4) */
+function plumeAlphaTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 256;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(128, 256);
+  const streaks = [];
+  for (let i = 0; i < 26; i++) streaks.push({ u: Math.random(), w: 2 + Math.random() * 9, a: 0.3 + Math.random() * 0.7 });
+  for (let y = 0; y < 256; y++) {
+    const v = y / 255;                       // 0 far end → 1 nozzle
+    const along = Math.pow(v, 0.65);          // dense at the nozzle, wispy far
+    for (let x = 0; x < 128; x++) {
+      const u = x / 127;
+      const radial = Math.pow(Math.sin(u * Math.PI), 1.4);
+      let s = 0.35;
+      for (const st of streaks) {
+        const d = Math.abs(u - st.u);
+        if (d < st.w / 128) s += st.a * (1 - d / (st.w / 128)) * 0.5;
+      }
+      const a = Math.min(1, s) * radial * along;
+      const i = (y * 128 + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
 function buildRocket(color, { player = false } = {}) {
   const g = new THREE.Group();
-  const shell = new THREE.MeshStandardMaterial({ color: '#cfd4dc', roughness: 0.45, metalness: 0.5, envMapIntensity: 0.7 });
-  const accent = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.4, envMapIntensity: 0.8 });
+  // r12/r13 (critic MED #3: the paint's env reflection overpowered the
+  // sun-facing diffuse side): metalness 0.5→0.26, env 0.7→0.38, roughness
+  // 0.46 — the SUN-side diffuse now clearly out-brightens any sky mirror; the
+  // panel map adds the seams that read as real aerospace skin
+  const shell = new THREE.MeshStandardMaterial({
+    color: '#dfe3e8', map: rocketPanelTexture(), roughness: 0.46, metalness: 0.26, envMapIntensity: 0.38,
+  });
+  const accent = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.22, envMapIntensity: 0.6 });
+  accent.userData.base = accent.color.clone(); // night dimming (fin saturation, r11 #12)
   const glass = new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.05, metalness: 0.8, transparent: true, opacity: 0.9, envMapIntensity: 1.0 });
 
-  // hull + nose (flies toward -Z)
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.58, 2.7, 12), shell);
-  body.rotation.x = -Math.PI / 2;
-  body.position.y = 1.3;
+  /* hull + ogive nose: ONE lathe — boat-tail flare at the engine, constant
+   * mid-body, smooth curved nose cone (flies toward -Z). 16 segments. */
+  const shellProfile = [
+    [0.46, 0], [0.50, 0.08], [0.545, 0.22], [0.55, 0.4], [0.55, 2.1],
+    [0.52, 2.4], [0.46, 2.72], [0.36, 3.02], [0.24, 3.28], [0.12, 3.48], [0.0, 3.62],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const body = new THREE.Mesh(new THREE.LatheGeometry(shellProfile, 16, 0, Math.PI * 2), shell);
+  body.rotation.x = -Math.PI / 2; // +Y (profile up = nose) → -Z forward
+  body.position.set(0, 1.3, 1.35); // engine end at +1.35, nose tip ≈ -2.27
   body.castShadow = true;
   g.add(body);
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.4, 12), accent);
-  band.rotation.x = -Math.PI / 2;
-  band.position.set(0, 1.3, -0.5);
-  g.add(band);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.3, 12), accent);
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.set(0, 1.3, -1.95);
-  nose.castShadow = true;
-  g.add(nose);
 
-  // porthole
-  const port = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), glass);
-  port.position.set(0, 1.55, -0.95);
+  // accent ring bands (merged into ONE mesh)
+  const bandA = new THREE.Mesh(new THREE.CylinderGeometry(0.556, 0.556, 0.2, 16, 1, true), accent);
+  bandA.rotation.x = Math.PI / 2;
+  bandA.position.set(0, 1.3, 0.3);
+  const bandB = bandA.clone();
+  bandB.position.z = -0.78; // shoulder ring (shell r ≈ 0.55 there)
+  const bandC = bandA.clone();
+  bandC.scale.set(1, 0.5, 1);
+  bandC.position.z = 0.95;
+  g.add(new THREE.Mesh(mergeStaticMeshes([bandA, bandB, bandC]), accent));
+
+  // porthole — offset to the shell RADIUS so it actually shows (the old one
+  // sat at 0.25 from the axis, fully buried inside the 0.55 body)
+  const port = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), glass);
+  port.position.set(0, 1.3 + 0.51, -0.55);
   g.add(port);
 
-  // fins (rear, +Z) — slim swept X-formation: the outer edge tapers so the
-  // fins read as fins, not flat cross-boards (critic r6, §5.3); all four merge
-  // into one draw call (§1.3)
+  // fins (rear, +Z) — extruded trapezoid planform with a BEVELED edge: real
+  // airfoil-ish thickness instead of a flat board (r12 modeling mandate).
+  // Chord → Z (leading edge forward), span → radial, thickness → tangential.
+  const finShape = new THREE.Shape();
+  finShape.moveTo(-0.12, 0);
+  finShape.lineTo(0.7, 0);
+  finShape.lineTo(0.52, 0.66);
+  finShape.lineTo(0.16, 0.66);
+  finShape.closePath();
+  const finGeo = new THREE.ExtrudeGeometry(finShape, {
+    depth: 0.05, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.03, bevelSegments: 2,
+  });
+  finGeo.rotateY(-Math.PI / 2); // shape X → +Z (chord along the body axis)
   const fins = [];
-  const finGeo = new THREE.BoxGeometry(0.07, 0.72, 0.62);
-  {
-    const fp = finGeo.attributes.position;
-    for (let i = 0; i < fp.count; i++) {
-      if (fp.getY(i) > 0) {
-        fp.setY(i, fp.getY(i) * 0.9);
-        fp.setZ(i, fp.getZ(i) * 0.45 + 0.18);
-      }
-    }
-    finGeo.computeVertexNormals();
-  }
   for (let i = 0; i < 4; i++) {
     const fin = new THREE.Mesh(finGeo, accent);
     const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-    fin.position.set(Math.cos(a) * 0.52, 1.3 + Math.sin(a) * 0.52, 1.5);
-    fin.rotation.z = a + Math.PI / 2;
-    fin.castShadow = true;
+    fin.position.set(Math.cos(a) * 0.5, 1.3 + Math.sin(a) * 0.5, 0.6);
+    fin.rotation.z = a;
     fins.push(fin);
   }
-  g.add(new THREE.Mesh(mergeStaticMeshes(fins), accent)); // 4 fins → 1 draw
+  const finMesh = new THREE.Mesh(mergeStaticMeshes(fins), accent);
+  finMesh.castShadow = true;
+  g.add(finMesh);
 
-  // engine bell — LOW env response: sooty metal must not mirror the sky env
-  // (the env sun blob turned the bell/cap into a cream mirror disc, r7 shot)
-  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.44, 0.5, 10, 1, true), new THREE.MeshStandardMaterial({ color: '#3a4048', roughness: 0.75, metalness: 0.6, envMapIntensity: 0.25, side: THREE.DoubleSide }));
-  bell.rotation.x = -Math.PI / 2;
-  bell.position.set(0, 1.3, 1.6);
+  // engine bell — lathe with a real bell curve (throat → expansion), sooty
+  // metal with LOW env response (must not mirror the sky env, r7)
+  const bellProfile = [
+    [0.26, 0], [0.29, 0.07], [0.35, 0.18], [0.4, 0.3], [0.425, 0.4],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const bell = new THREE.Mesh(new THREE.LatheGeometry(bellProfile, 14), new THREE.MeshStandardMaterial({ color: '#3a4048', roughness: 0.75, metalness: 0.6, envMapIntensity: 0.25, side: THREE.DoubleSide }));
+  bell.rotation.x = Math.PI / 2; // opening aft (+Z)
+  bell.position.set(0, 1.3, 1.36);
   g.add(bell);
 
   // dark rear cap — the body's open rear face was catching full sun and
   // reading as the "burned white disc" behind the plume (critic r7); real
   // engine housings are dark matte metal
-  const rearCap = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12), new THREE.MeshStandardMaterial({ color: '#23262c', roughness: 0.85, metalness: 0.35, envMapIntensity: 0.25 }));
-  rearCap.position.set(0, 1.3, 1.355);
+  const rearCap = new THREE.Mesh(new THREE.CircleGeometry(0.46, 14), new THREE.MeshStandardMaterial({ color: '#23262c', roughness: 0.85, metalness: 0.35, envMapIntensity: 0.25 }));
+  rearCap.position.set(0, 1.3, 1.365);
   g.add(rearCap);
 
-  // exhaust — always on (it's a rocket), flares with combo heat; capped so
-  // ACES keeps color/detail instead of a burned white blob (critic r2).
-  // r5: a long hot COLUMN, not a round blob — narrow core cone inside a
-  // longer plume cone inside a faint wide column (critic r5, §5.4)
-  const jetMat = new THREE.MeshBasicMaterial({ color: '#ff9b45', transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false });
-  const jet = new THREE.Mesh(new THREE.ConeGeometry(0.3, 4.6, 10), jetMat);
-  jet.rotation.x = Math.PI / 2;
-  jet.position.set(0, 1.3, 3.9);
+  // exhaust — r12: soft VENTING VAPOR, not stacked cones (critic r11 LOW #4:
+  // translucent beige cone with a crisp chevron seam). Two alpha-textured
+  // open cylinders (streaked, silhouette-soft) + a small nozzle glow sprite.
+  const plumeTex = plumeAlphaTexture();
+  const jetMat = new THREE.MeshBasicMaterial({
+    color: '#ffc9a0', map: plumeTex, transparent: true, opacity: 0.55,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.4, 5.2, 14, 1, true), jetMat);
+  jet.rotation.x = Math.PI / 2; // narrow far end aft (+Y → +Z)
+  jet.position.set(0, 1.3, 1.36 + 2.6);
   g.add(jet);
-  const jetCoreMat = new THREE.MeshBasicMaterial({ color: '#ffd9a0', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
-  const jetCore = new THREE.Mesh(new THREE.ConeGeometry(0.11, 2.8, 10), jetCoreMat);
+  const jetCoreMat = new THREE.MeshBasicMaterial({
+    color: '#fff1d8', map: plumeTex, transparent: true, opacity: 0.5,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
+  const jetCore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.22, 2.4, 12, 1, true), jetCoreMat);
   jetCore.rotation.x = Math.PI / 2;
-  jetCore.position.set(0, 1.3, 2.9);
+  jetCore.position.set(0, 1.3, 1.36 + 1.2);
   g.add(jetCore);
-  const jetColumnMat = new THREE.MeshBasicMaterial({ color: '#ff8a3d', transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
-  const jetColumn = new THREE.Mesh(new THREE.ConeGeometry(0.55, 7.0, 10, 1, true), jetColumnMat);
-  jetColumn.rotation.x = Math.PI / 2;
-  jetColumn.position.set(0, 1.3, 4.9);
-  g.add(jetColumn);
 
   // nozzle glow sprite — small, dim: bloom, not a star (critic r2: ~10% burned).
   // r7: tighter still — the halo was swallowing the fins and lower body
@@ -172,10 +267,13 @@ function buildRocket(color, { player = false } = {}) {
   // bots: cheap longer exhaust smear (§5.4 budget alternative to a trail)
   let smearMat = null;
   if (!player) {
-    smearMat = new THREE.MeshBasicMaterial({ color: '#ff9b45', transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false });
-    const smear = new THREE.Mesh(new THREE.ConeGeometry(0.24, 4.5, 8), smearMat);
+    smearMat = new THREE.MeshBasicMaterial({
+      color: '#ffc9a0', map: plumeTex, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const smear = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.3, 4.2, 12, 1, true), smearMat);
     smear.rotation.x = Math.PI / 2;
-    smear.position.set(0, 1.3, 4.4);
+    smear.position.set(0, 1.3, 1.36 + 2.1);
     g.add(smear);
   }
 
@@ -228,7 +326,7 @@ function buildRocket(color, { player = false } = {}) {
   hover.position.set(0.4, 0.045, 0.75);
   g.add(hover);
 
-  return { group: g, jet, jetMat, jetCore, jetCoreMat, jetColumnMat, jetGlowMat, smearMat, trail, light, shellMat: shell, accentMat: accent };
+  return { group: g, jet, jetMat, jetCore, jetCoreMat, jetGlowMat, smearMat, trail, light, shellMat: shell, accentMat: accent };
 }
 
 export function create(world, { racers, seed, timeOfDay = 'day' }) {
@@ -333,13 +431,15 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // r11: low rolling hills on the far terrain — the r10 ground/sky junction
   // was one dead-straight line across the whole shot (photo tell). No props
   // sit on this plane (asteroids float), so displacement is free of grounding.
-  const groundDunes = makeDunes(4300, { cell: 170, octaves: 3, gain: 0.5 });
+  // r12 iterate: amp 4.5→9 + wider cells — the r11 hills were too subtle to
+  // break the straight horizon at chase-cam grazing angle
+  const groundDunes = makeDunes(4300, { cell: 260, octaves: 3, gain: 0.55 });
   const groundFade = (x) => { // flat under the strip, rolling beyond its edge
     const t = Math.min(1, Math.max(0, (Math.abs(x) - 9) / 26));
     return t * t * (3 - 2 * t);
   };
   const groundGeo = new THREE.PlaneGeometry(1600, 2400, 64, 96);
-  displaceGroundPlane(groundGeo, groundDunes, { amp: 4.5, fadeFn: groundFade });
+  displaceGroundPlane(groundGeo, groundDunes, { amp: 9, fadeFn: groundFade });
   const launchGround = new THREE.Mesh(
     groundGeo,
     new THREE.MeshStandardMaterial({
@@ -351,6 +451,26 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   launchGround.position.set(0, -14, -TRACK_LENGTH / 2);
   launchGround.receiveShadow = true;
   group.add(launchGround);
+
+  // ground boulders — half-sunk into the rolling terrain (r12: anchors the
+  // foreground the way the critic's "dark rocks hover unsupported in mid-sky"
+  // note demanded; the floaters above are pushed far out and low instead)
+  const boulderMat = new THREE.MeshStandardMaterial({ color: '#5c6470', roughness: 1, flatShading: true });
+  const boulderParts = [];
+  for (let i = 0; i < 14; i++) {
+    const side = i % 2 ? 1 : -1;
+    const bx = side * (10.5 + rng() * 15);
+    const bz = 10 - rng() * (TRACK_LENGTH + 40);
+    const s = 0.7 + rng() * 1.9;
+    const rock = new THREE.Mesh(jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.3, seed: 90 + i, freq: 2.6 }), boulderMat);
+    const gy = (groundDunes(bx, bz) - 0.5) * 2 * 9 * groundFade(bx);
+    rock.position.set(bx, -14 + gy + s * 0.55, bz);
+    rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    boulderParts.push(rock);
+  }
+  const boulders = new THREE.Mesh(mergeStaticMeshes(boulderParts), boulderMat);
+  boulders.castShadow = true;
+  group.add(boulders);
 
   /* ---------- ring gates ---------- */
   // ONE InstancedMesh + per-instance color (alternating teal/steel) instead of
@@ -389,8 +509,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     for (let i = 0; i < AST_N; i++) {
       const s = 0.5 + rng() * 3.2;
       const side = rng() > 0.5 ? 1 : -1;
-      astX[i] = side * (14 + rng() * 60);
-      astY[i] = rng() * 26 - 4;
+      // r12 (critic r11 LOW #5: dark rocks hover unsupported in mid-sky):
+      // floaters now hug a LOW band far from the strip (read as horizon debris)
+      // and only every 5th drifts high; the foreground is anchored by the
+      // half-sunk ground boulders instead
+      astX[i] = side * (18 + rng() * 52);
+      astY[i] = (i % 5 === 0) ? 8 + rng() * 14 : -3 + rng() * 10;
       astZ[i] = 16 - rng() * (TRACK_LENGTH + 60);
       astS[i] = s;
       astRX[i] = rng() * 3; astRY[i] = rng() * 3;
@@ -537,14 +661,17 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     vehicles.forEach((v) => {
       v.jetMat.opacity = tod.plume * plumeK;
       v.jetCoreMat.opacity = tod.plume * 0.55 * plumeK; // core keeps color, reads in daylight (r6/r7 burn fix)
-      v.jetColumnMat.opacity = tod.plume * 0.24 * plumeK;
       if (v.smearMat) v.smearMat.opacity = Math.max(0.18, tod.plume * 0.4 * plumeK); // bots read too (r4)
       if (v.light) v.light.intensity = tod.jetLight; // player only — the jet is the lamp
       // sooty metal must not mirror the env sun — night rims stay physical
       // (r7 note + r10 #5); day: real glints on the white shell
-      const vehEnv = name === 'night' ? 0.2 : name === 'sunset' ? 0.45 : 0.8;
+      const vehEnv = name === 'night' ? 0.2 : name === 'sunset' ? 0.4 : 0.38;
       v.shellMat.envMapIntensity = vehEnv;
       v.accentMat.envMapIntensity = vehEnv;
+      // r12 (LOW #12): moonlight never renders a SATURATED fin — the accent
+      // albedo itself dims with the TOD (jetLight also dropped 34→18)
+      const accentK = name === 'night' ? 0.5 : name === 'sunset' ? 0.75 : 1.0;
+      v.accentMat.color.copy(v.accentMat.userData.base).multiplyScalar(accentK);
     });
   }
   setTimeOfDay(timeOfDay);
@@ -589,11 +716,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       const flicker = 0.85 + Math.random() * 0.3;
       const power = 0.35 + s01 * 0.5 + heat * 0.8;
       v.jet.scale.set(0.7 + power * 0.7, power * flicker, 0.7 + power * 0.7);
-      // end-on (chase cam) the additive cones stack into one disc — keep the
-      // rest-state stack dim so the core keeps color, not white (critic r7)
-      v.jetMat.opacity = Math.min(0.45, 0.1 + s01 * 0.3 + heat * 0.3) * plumeK;
+      // r12: higher IDLE floor — the alpha-streaked vapor cylinders all but
+      // vanished at rest with the old 0.1 floor (r11 LOW #4's "sprite-like"
+      // complaint cuts both ways: idle venting must stay visible, softly)
+      v.jetMat.opacity = Math.min(0.5, 0.24 + s01 * 0.26 + heat * 0.25) * plumeK;
       v.jetCore.scale.set(0.8 + heat * 0.9, power * flicker, 0.8 + heat * 0.9);
-      v.jetCoreMat.opacity = Math.min(0.42, 0.12 + s01 * 0.2 + heat * 0.25) * plumeK;
+      v.jetCoreMat.opacity = Math.min(0.45, 0.18 + s01 * 0.18 + heat * 0.22) * plumeK;
       v.jetGlowMat.opacity = Math.min(0.1, 0.03 + power * 0.06) * plumeK; // halo must not swallow the fins (r7)
 
       // vapor trail: sample the nozzle every 40ms into the ring buffer and

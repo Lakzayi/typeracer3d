@@ -3,17 +3,43 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane, loftSections, loftTube, jitterRock } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
-// lower leg + hoof as ONE geometry (pivot at the knee) — 4 legs × 2 draws per
-// horse instead of 4 × 3 (SPEC §1.3 draw-call budget)
-const LOWER_GEO = new THREE.BoxGeometry(0.12, 0.45, 0.14);
-LOWER_GEO.translate(0, -0.225, 0);
-const HOOF_GEO_T = new THREE.BoxGeometry(0.14, 0.12, 0.2);
-HOOF_GEO_T.translate(0, -0.51, 0); // knee-local: box spans [-0.57,-0.45]
+// r12 modeling pass — real horse legs: the upper segment is a tapered loft
+// (wider gaskin/forearm → slimmer knee) with a joint ball merged at the knee
+// so the bend never shows a gap; the lower segment lofts cannon → fetlock and
+// carries a dark hoof. Lower+hoof stay ONE geometry (pivot at the knee) —
+// 4 legs × 2 draws per horse (SPEC §1.3 draw-call budget).
+const UPPER_FRONT_GEO = loftTube([[0, 0, 0], [0, -0.46, 0.02]], [0.125, 0.085], 8);
+const UPPER_HIND_GEO = loftTube([[0, 0, 0], [0, -0.46, 0.02]], [0.155, 0.09], 8);
+{
+  // knee ball caps the upper segment (inside coat material)
+  for (const geo of [UPPER_FRONT_GEO, UPPER_HIND_GEO]) {
+    const ball = new THREE.SphereGeometry(0.078, 8, 6);
+    ball.translate(0, -0.45, 0.02);
+    const merged = mergeStaticMeshes([new THREE.Mesh(geo), new THREE.Mesh(ball)]);
+    geo.copy(merged);
+    merged.dispose();
+  }
+}
+const LOWER_GEO = loftTube([[0, -0.03, 0], [0, -0.3, 0.008], [0, -0.43, 0.024]], [0.062, 0.048, 0.042], 8);
+const HOOF_GEO_T = new THREE.BoxGeometry(0.115, 0.1, 0.16);
+HOOF_GEO_T.translate(0, -0.475, 0.028); // knee-local: hoof under the fetlock
 const LEG_LOWER_GEO = mergeStaticMeshes([new THREE.Mesh(LOWER_GEO), new THREE.Mesh(HOOF_GEO_T)]);
+
+/* cylinder strut between two points (reins, straps) — build-time helper */
+function cylBetween(a, b, r) {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 5));
+  cyl.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+  cyl.quaternion.setFromUnitVectors(
+    new THREE.Vector3(0, 1, 0),
+    new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize()
+  );
+  return cyl;
+}
 
 const TOD = {
   day: {
@@ -30,10 +56,10 @@ const TOD = {
   },
   sunset: {
     skyTop: '#3a2468', skyMid: '#c25a4e', skyBot: '#ffb05a',
-    fogDensity: 0.0026, exposure: 0.85, sunRig: [72, 9, 4], sunDisc: 0.9, sunTint: '#ffb06a', envSun: 0.7,
+    fogDensity: 0.0026, exposure: 0.85, sunRig: [72, 9, 4], sunDisc: 0.9, sunCore: 2.6, sunTint: '#ffb06a', envSun: 0.7,
     sunColor: '#ff8a3d', sunIntensity: 1.75,
     hemiSky: '#f0a878', hemiGround: '#7a5238', hemiIntensity: 0.38,
-    ambient: 0.0, lanterns: 0.6, fires: 0.7, stars: 0.25, lanternLight: 0, fireLight: 7,
+    ambient: 0.0, lanterns: 0.6, fires: 0.7, stars: 0.25, lanternLight: 2.5, fireLight: 7,
   },
   night: {
     // near-black sky + near-black desert; pools live on the fixed lantern
@@ -42,7 +68,10 @@ const TOD = {
     fogDensity: 0.0032, exposure: 0.78, sunRig: [-24, 46, 32], sunDisc: 0, envSun: 0.12,
     sunColor: '#8fb0ff', sunIntensity: 0.5,
     hemiSky: '#2a3f60', hemiGround: '#16130e', hemiIntensity: 0.55,
-    ambient: 0.04, lanterns: 1.0, fires: 1.0, stars: 1.0, lanternLight: 0, fireLight: 12,
+    // r12 (critic r11 LOW #11: lantern glowed but lit nothing): the player's
+    // lantern now carries a real PointLight — it IS an emissive source, so a
+    // small warm pool on the horse's flank + ground beneath is physical
+    ambient: 0.04, lanterns: 1.0, fires: 1.0, stars: 1.0, lanternLight: 5, fireLight: 12,
   },
 };
 
@@ -51,76 +80,106 @@ function buildHorse(color, { player = false } = {}) {
   const coat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, envMapIntensity: 0.05 });
   const maneMat = new THREE.MeshStandardMaterial({ color: '#2a2019', roughness: 1, envMapIntensity: 0.05 });
   const skin = new THREE.MeshStandardMaterial({ color: '#e6b98f', roughness: 0.9 });
+  const leather = new THREE.MeshStandardMaterial({ color: '#4a3120', roughness: 0.75, envMapIntensity: 0.1 });
 
-  // body — box with chest/rump taper: front deeper, hindquarters narrower so
-  // the rear silhouette stops reading as a raw rectangle (critic r5, §5.3).
-  // Static coat parts (body/rump/neck/head) merge into ONE mesh (§1.3).
-  const bodyGeo = new THREE.BoxGeometry(0.95, 0.95, 2.3);
-  {
-    const pos = bodyGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const z = pos.getZ(i);
-      if (z > 0.6) { pos.setX(i, pos.getX(i) * 0.8); pos.setY(i, pos.getY(i) * 0.86); }      // rump tuck
-      else if (z < -0.6) { pos.setX(i, pos.getX(i) * 1.08); pos.setY(i, pos.getY(i) * 1.1); } // chest
-    }
-    bodyGeo.computeVertexNormals();
-  }
-  const body = new THREE.Mesh(bodyGeo, coat);
-  body.position.y = 1.25; body.castShadow = true;
-  const rump = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.62, 0.5), coat);
-  rump.position.set(0, 1.24, 1.2);
+  /* ---- barrel + masses (r12): a lathe with a real belly curve — deep chest,
+   * slight belly drop, tucked flank — squashed width<depth like a real horse.
+   * Shoulder and haunch masses are merged ellipsoids; neck is a lofted arc
+   * (thick at the base, tapering to the poll) blending into a skull+muzzle
+   * head. ALL coat parts merge into ONE mesh (§1.3). */
+  const barrelProfile = [
+    [0.30, -1.18], [0.40, -1.05], [0.455, -0.75], [0.435, -0.35],
+    [0.46, 0.05], [0.50, 0.45], [0.465, 0.85], [0.30, 1.18],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const barrel = new THREE.Mesh(new THREE.LatheGeometry(barrelProfile, 14), coat);
+  barrel.rotation.x = Math.PI / 2; // lathe axis Y → length axis Z (profile -y = chest → -z)
+  barrel.scale.set(0.80, 1.12, 1); // narrower than deep — real equine cross-section
+  barrel.position.y = 1.25;
+  const chest = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), coat);
+  chest.scale.set(0.32, 0.42, 0.40);
+  chest.position.set(0, 1.28, -0.82);
+  const haunch = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), coat);
+  haunch.scale.set(0.35, 0.46, 0.52);
+  haunch.position.set(0, 1.30, 0.85);
+  // neck: arched loft tube — withers → crest → poll
+  const neckGeo = loftTube(
+    [[0, 1.5, -0.95], [0, 1.98, -1.32], [0, 2.44, -1.5], [0, 2.78, -1.46]],
+    [0.30, 0.26, 0.19, 0.145], 10
+  );
+  // head: skull ellipsoid + tapered muzzle loft + ears, riding high & forward
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), coat);
+  skull.scale.set(0.155, 0.175, 0.25);
+  skull.position.set(0, 2.9, -1.58);
+  skull.rotation.x = -0.25;
+  const muzzleGeo = loftTube([[0, 2.88, -1.72], [0, 2.8, -1.98]], [0.115, 0.08], 8);
+  const earGeo = new THREE.ConeGeometry(0.055, 0.17, 5);
+  const earL = new THREE.Mesh(earGeo, coat);
+  earL.position.set(-0.085, 3.08, -1.4);
+  earL.rotation.set(-0.25, 0, 0.3);
+  const earR = earL.clone(); earR.position.x = 0.085; earR.rotation.z = -0.3;
+  const coatMesh = new THREE.Mesh(
+    mergeStaticMeshes([barrel, chest, haunch, new THREE.Mesh(neckGeo), skull,
+      new THREE.Mesh(muzzleGeo), earL, earR]),
+    coat
+  );
+  coatMesh.castShadow = true;
+  g.add(coatMesh);
 
-  // neck — arched (§5.3): steeper pivot so the head rises above the withers
-  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.15, 0.5), coat);
-  neck.position.set(0, 1.9, -1.05);
-  neck.rotation.x = 0.95;
-  neck.castShadow = true;
-  // head rides HIGH and forward of the rider's hat so the silhouette reads
-  // from the chase camera (critic r6: "neck is a plain vertical box")
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.44, 0.9), coat);
-  head.position.set(0, 2.88, -1.52);
-  head.rotation.x = -0.55; // muzzle levels forward off the arched neck
-  head.castShadow = true;
-  g.add(new THREE.Mesh(mergeStaticMeshes([body, rump, neck, head]), coat));
-  const earGeo = new THREE.ConeGeometry(0.07, 0.2, 4);
-  const earL = new THREE.Mesh(earGeo, coat); earL.position.set(-0.12, 3.14, -1.42);
-  const earR = earL.clone(); earR.position.x = 0.12;
-  g.add(new THREE.Mesh(mergeStaticMeshes([earL, earR]), coat));
-  const mane = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.2, 0.2), maneMat);
-  mane.position.set(0, 2.08, -0.86);
-  mane.rotation.x = 0.95;
-  g.add(mane);
+  // eyes — two dark beads (read at chase-cam distance, give the head a face)
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 4), maneMat);
+  eyeL.position.set(-0.13, 2.93, -1.66);
+  const eyeR = eyeL.clone(); eyeR.position.x = 0.13;
 
-  // tail — fuller fall of hair hanging from the dock (visible below the rump
-  // from astern, critic r5); both hair boxes merge into ONE mesh that still
-  // swings with the tail group
+  /* ---- mane: layered strands along the crest (alternating offsets break the
+   * comb-strip look) + forelock between the ears + eyes merged in (dark) */
+  const maneParts = [eyeL, eyeR];
+  const strand = [[0, 1.72, -1.1], [0, 2.02, -1.3], [0, 2.28, -1.42], [0, 2.52, -1.47], [0, 2.72, -1.46]];
+  strand.forEach(([x, y, z], i) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.36, 0.15), maneMat);
+    m.position.set(x, y, z);
+    m.rotation.x = 0.9;
+    m.rotation.z = (i % 2 ? 1 : -1) * 0.06;
+    m.position.z += (i % 2 ? 1 : -1) * 0.015;
+    maneParts.push(m);
+  });
+  const forelock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.2, 0.09), maneMat);
+  forelock.position.set(0, 2.98, -1.5);
+  forelock.rotation.x = -0.5;
+  maneParts.push(forelock);
+  const maneMesh = new THREE.Mesh(mergeStaticMeshes(maneParts), maneMat);
+  maneMesh.castShadow = true;
+  g.add(maneMesh);
+
+  /* ---- tail: docked bone (coat-less, dark) + three layered hair slabs that
+   * fall with a slight rearward arc; hangs from the dock and swishes gently */
   const tail = new THREE.Group();
-  const tailUpper = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.72, 0.3), maneMat);
-  tailUpper.geometry.translate(0, -0.32, 0.04);
-  const tailLower = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.95, 0.24), maneMat);
-  tailLower.geometry.translate(0, -0.45, 0.02);
-  tailLower.position.set(0, -0.54, 0.12);
-  tailLower.rotation.x = 0.3;
-  tailLower.rotation.y = 0.3; // slight twist so hair reads 3D, not a flat quad (critic r7)
-  tail.add(new THREE.Mesh(mergeStaticMeshes([tailUpper, tailLower]), maneMat));
-  tail.position.set(0, 1.5, 1.48);
-  tail.rotation.x = 0.9;
+  const tailBone = loftTube([[0, 0, 0], [0, -0.18, 0.06]], [0.085, 0.055], 8);
+  const hairA = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.62, 0.12), maneMat);
+  hairA.position.set(0, -0.4, 0.06); hairA.rotation.x = 0.18;
+  const hairB = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.8, 0.10), maneMat);
+  hairB.position.set(0, -0.5, 0.11); hairB.rotation.x = 0.32;
+  const hairC = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.66, 0.08), maneMat);
+  hairC.position.set(0.03, -0.42, 0.16); hairC.rotation.x = 0.46;
+  tail.add(new THREE.Mesh(mergeStaticMeshes([new THREE.Mesh(tailBone), hairA, hairB, hairC]), maneMat));
+  tail.position.set(0, 1.6, 1.1);
+  tail.rotation.x = 0.2;
   g.add(tail);
 
-  // legs — two-segment with knee (§5.3): pronounced upper/lower contrast AND a
-  // dark lower segment so the joint reads from astern (critic r5/r6). Lower+hoof
-  // are one merged geometry (LEG_LOWER_GEO, module scope).
-  const upperGeo = new THREE.BoxGeometry(0.27, 0.5, 0.32);
-  upperGeo.translate(0, -0.25, 0);
+  /* ---- legs: tapered upper (with knee ball) + dark lower+hoof, two-segment
+   * gait as before (§5.3) */
   const legs = [];
   const lowers = [];
-  for (const [x, z] of [[-0.38, -0.85], [0.38, -0.85], [-0.38, 0.95], [0.38, 0.95]]) {
-    const leg = new THREE.Mesh(upperGeo, coat);
-    leg.position.set(x, 1.05, z);
-    leg.rotation.z = x < 0 ? -0.06 : 0.06; // slight outward splay — perfectly vertical pillars read as sticks (r9)
+  const legDefs = [
+    [-0.26, -0.78, UPPER_FRONT_GEO], [0.26, -0.78, UPPER_FRONT_GEO],
+    [-0.26, 0.88, UPPER_HIND_GEO], [0.26, 0.88, UPPER_HIND_GEO],
+  ];
+  for (const [x, z, uGeo] of legDefs) {
+    const leg = new THREE.Mesh(uGeo, coat);
+    leg.position.set(x, 1.04, z);
+    leg.rotation.z = x < 0 ? -0.05 : 0.05; // slight outward splay — vertical pillars read as sticks (r9)
     const lower = new THREE.Mesh(LEG_LOWER_GEO, maneMat); // dark lower = visible joint
-    lower.position.set(0, -0.5, 0);
-    lower.rotation.x = 0.55; // pronounced standing knee bend so the joint breaks the leg line (r9 critic)
+    lower.position.set(0, -0.47, 0.02);
+    lower.rotation.x = 0.3; // standing knee bend so the joint breaks the leg line (r9)
     leg.add(lower);
     leg.castShadow = true;
     g.add(leg);
@@ -128,28 +187,61 @@ function buildHorse(color, { player = false } = {}) {
     lowers.push(lower);
   }
 
-  // rider (tiny cowboy) — slim: the torso was nearly as wide as the rump and
-  // the hat brim a giant disc, hiding the neck/head silhouette (critic r7).
-  // r11: hat + boots are ONE maneMat mesh (dark leather ≈ hair tone) — 4 → 1
-  // draws per rider (§1.3; horse was the one theme over the budget)
-  const rider = new THREE.Group();
+  /* ---- tack: blanket (rider shirt material — dims with the TOD together),
+   * saddle seat + pommel + cantle + girth ring + stirrups + reins */
   const shirtMat = new THREE.MeshStandardMaterial({ color: player ? '#ffd75e' : '#3a4a6b', roughness: 0.9, envMapIntensity: 0.15 });
   shirtMat.userData.base = shirtMat.color.clone(); // per-TOD dim (night fill below)
+  const blanket = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.05, 0.66), shirtMat);
+  blanket.position.set(0, 1.77, 0.12);
+  blanket.castShadow = true;
+  g.add(blanket); // own draw (shirtMat is TOD-dimmed, so it can't join leather)
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.09, 0.5), leather);
+  seat.position.set(0, 1.84, 0.14);
+  const pommel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.09), leather);
+  pommel.position.set(0, 1.89, -0.09);
+  const cantle = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.08, 0.07), leather);
+  cantle.position.set(0, 1.88, 0.42);
+  const girth = new THREE.Mesh(new THREE.TorusGeometry(0.52, 0.024, 6, 20), leather);
+  girth.position.set(0, 1.25, 0.18);
+  girth.scale.set(0.82, 1.18, 1); // hugs the barrel cross-section
+  const stirrupParts = [seat, pommel, cantle, girth];
+  for (const sx of [-0.32, 0.32]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.34, 0.03), leather);
+    strap.position.set(sx, 1.66, 0.16);
+    const stirrup = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), leather);
+    stirrup.position.set(sx, 1.45, 0.16);
+    stirrupParts.push(strap, stirrup);
+  }
+  // reins: bit → rider hands (rider sits at (0, 1.86, 0.16), hands forward)
+  stirrupParts.push(
+    cylBetween([0, 2.78, -1.52], [-0.09, 2.28, -0.02], 0.012),
+    cylBetween([0, 2.78, -1.52], [0.09, 2.28, -0.02], 0.012),
+  );
+  const leatherMesh = new THREE.Mesh(mergeStaticMeshes(stirrupParts), leather);
+  leatherMesh.castShadow = true;
+  g.add(leatherMesh);
+
+  // rider (tiny cowboy) — sits ON the saddle now; arms reach the reins
+  const rider = new THREE.Group();
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.55, 0.26), shirtMat);
-  torso.position.y = 0.5;
+  torso.position.y = 0.28;
   const headR = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), skin);
   skin.userData.base = skin.color.clone();
-  headR.position.y = 0.9;
+  headR.position.y = 0.68;
   const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 10), maneMat);
-  hatBrim.position.y = 1.0;
+  hatBrim.position.y = 0.78;
   const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.16, 10), maneMat);
-  hatTop.position.y = 1.09;
+  hatTop.position.y = 0.87;
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.07), maneMat);
+  armL.position.set(-0.16, 0.38, -0.12);
+  armL.rotation.x = -0.9;
+  const armR = armL.clone(); armR.position.x = 0.16;
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, 0.15), maneMat);
-  legL.position.set(-0.13, 0.18, 0);
+  legL.position.set(-0.13, 0.05, 0.05);
   const legR = legL.clone(); legR.position.x = 0.13;
   rider.add(torso, headR,
-    new THREE.Mesh(mergeStaticMeshes([hatBrim, hatTop, legL, legR]), maneMat));
-  rider.position.set(0, 1.66, 0.3);
+    new THREE.Mesh(mergeStaticMeshes([hatBrim, hatTop, armL, armR, legL, legR]), maneMat));
+  rider.position.set(0, 1.86, 0.16);
   g.add(rider);
 
   // player lantern — real light that lights the trail at night
@@ -161,7 +253,7 @@ function buildHorse(color, { player = false } = {}) {
     new THREE.MeshStandardMaterial({ color: '#4a3d2e', roughness: 0.7, emissive: '#ffb84d', emissiveIntensity: 0 }));
   const lanternLight = new THREE.PointLight('#ffbb55', 0, 9, 2);
   lantern.add(cage, lanternLight);
-  lantern.position.set(-0.42, 2.15, 0.4);
+  lantern.position.set(-0.45, 2.12, 0.2);
   g.add(lantern);
 
   // dust puff behind hooves (speed) — grows with combo heat
@@ -278,55 +370,109 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   posts.dispose();
 
   // cacti — proper saguaro form: trunk + upward elbow arms (critic r5, §5.3).
-  // Every part is merged into ONE mesh so arms cost no extra draw calls.
-  // r11: each cactus is GROUNDED on the dune field (duneY at its x,z) — the
-  // displaced sand would otherwise swallow or float them
+  // r12: VERTICAL RIBS — the flutes are in the cross-section (radius modulated
+  // by cos 7θ), which breaks the smooth-plastic cylinder shading that made
+  // props read flat (critic r11 LOW #10). Every part is merged into ONE mesh.
+  // r11: each cactus is GROUNDED on the dune field (duneY at its x,z).
   const cactusMat = new THREE.MeshStandardMaterial({ color: '#497a4a', roughness: 1 });
-  const cactusParts = [];
+  const cactusMatB = new THREE.MeshStandardMaterial({ color: '#5c8a50', roughness: 1 }); // r13: two-tone
+  // rings wind CW seen from +Y (=-sin a) so wall normals face outward for a
+  // +Y loft (see loftSections note)
+  const ribbedTube = (h, r0, r1) => {
+    const rings = [];
+    for (const [t, r] of [[0, r0], [0.55, Math.max(r0, r1)], [0.88, r1], [1, r1 * 0.45]]) {
+      const ring = [];
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        const rr = r * (1 + 0.085 * Math.cos(a * 7));
+        ring.push([Math.cos(a) * rr, t * h - h / 2, -Math.sin(a) * rr]);
+      }
+      rings.push(ring);
+    }
+    return loftSections(rings, { capStart: true, capEnd: true });
+  };
+  const cactusParts = [[], []]; // r13: two material groups → 2 draws
   for (let i = 0; i < 70; i++) {
     const side = rng() > 0.5 ? 1 : -1;
     const x = side * (12 + rng() * 40);
     const z = 16 - rng() * (TRACK_LENGTH + 30);
     const h = 1.6 + rng() * 2.2;
     const dY = duneY(x, z);
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, h, 7), cactusMat);
+    const g = i % 2; // alternate the two greens for natural variety
+    const trunk = new THREE.Mesh(ribbedTube(h, 0.28, 0.21), g ? cactusMatB : cactusMat);
     trunk.position.set(x, h / 2 + dY, z);
-    cactusParts.push(trunk);
+    cactusParts[g].push(trunk);
     const nArms = rng() > 0.5 ? 2 : 1;
     for (let a = 0; a < nArms; a++) {
       const armSide = a === 0 ? 1 : -1;
       const armY = h * (0.45 + rng() * 0.25);
       // horizontal elbow, then vertical forearm (saguaro silhouette)
-      const elbow = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.42, 6), cactusMat);
+      const elbow = new THREE.Mesh(ribbedTube(0.44, 0.15, 0.13), g ? cactusMatB : cactusMat);
       elbow.rotation.z = armSide * Math.PI / 2;
       elbow.position.set(x + armSide * 0.42, armY + dY, z);
-      const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, h * 0.32, 6), cactusMat);
+      const fore = new THREE.Mesh(ribbedTube(h * 0.32, 0.14, 0.12), g ? cactusMatB : cactusMat);
       fore.position.set(x + armSide * 0.6, armY + h * 0.16 + dY, z);
-      cactusParts.push(elbow, fore);
+      cactusParts[g].push(elbow, fore);
     }
   }
-  const cacti = new THREE.Mesh(mergeStaticMeshes(cactusParts), cactusMat);
-  cacti.castShadow = true;
-  group.add(cacti);
+  for (const parts of cactusParts) {
+    const mesh = new THREE.Mesh(mergeStaticMeshes(parts), parts === cactusParts[0] ? cactusMat : cactusMatB);
+    mesh.castShadow = true;
+    group.add(mesh);
+  }
 
-  // mesas on the horizon (stacked boxes) — darkened at night (critic r2:
-  // distant blocks read dusk-pink); materials collected for per-TOD tinting.
-  // r11: base+top merged per mesa (20 → 10 draws — §1.3 budget)
+  // r13 desert rocks — noise-jittered boulders grounded on the dune field
+  // (props shaded flat, critic LOW #10: broken silhouettes + real shadows)
+  const desertRockMat = new THREE.MeshStandardMaterial({ color: '#8a6f52', roughness: 1, flatShading: true });
+  const desertRockParts = [];
+  for (let i = 0; i < 18; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const bx = side * (9.5 + rng() * 26);
+    const bz = 10 - rng() * (TRACK_LENGTH + 30);
+    const s = 0.4 + rng() * 1.3;
+    const rock = new THREE.Mesh(jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.3, seed: 610 + i, freq: 2.8 }), desertRockMat);
+    rock.position.set(bx, duneY(bx, bz) + s * 0.5, bz);
+    rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+    desertRockParts.push(rock);
+  }
+  const desertRocks = new THREE.Mesh(mergeStaticMeshes(desertRockParts), desertRockMat);
+  desertRocks.castShadow = true;
+  group.add(desertRocks);
+
+  // mesas on the horizon — r12: real butte profiles via a lofted ring stack
+  // (steep skirt → bench → flat cap) with a per-angle plan wobble, replacing
+  // the stacked-box look (props read flat, critic r11 LOW #10). All 10 merge
+  // into 2 meshes by material (10 → 2 draws, §1.3).
   const mesaMats = [];
   const mesaBase = ['#b5714a', '#a3654a'];
+  const mesaParts = [[], []];
+  const mesaWobble = [];
   for (let i = 0; i < 10; i++) {
     const side = i % 2 ? 1 : -1;
     const w = 30 + rng() * 40, h = 18 + rng() * 26, d = 20 + rng() * 30;
-    const mat = new THREE.MeshStandardMaterial({ color: mesaBase[i % 2], roughness: 1, flatShading: true });
-    mesaMats.push(mat);
-    const base = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.7, d), mat);
-    base.position.y = h * 0.35;
-    const top = new THREE.Mesh(new THREE.BoxGeometry(w * 0.7, h * 0.3, d * 0.7), mat);
-    top.position.y = h * 0.85;
+    const rings = [];
+    const prof = [[0.0, 1.1], [0.4, 1.0], [0.68, 0.86], [0.78, 0.64], [1.0, 0.6]];
+    mesaWobble.length = 0;
+    for (let k = 0; k < 16; k++) mesaWobble.push(0.85 + rng() * 0.32); // shared plan wobble
+    for (const [t, s] of prof) {
+      const ring = [];
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        const wb = mesaWobble[k];
+        ring.push([Math.cos(a) * (w / 2) * s * wb, t * h, -Math.sin(a) * (d / 2) * s * wb]);
+      }
+      rings.push(ring);
+    }
+    const mesh = new THREE.Mesh(loftSections(rings, { capStart: true, capEnd: true }));
     const mx = side * (120 + rng() * 160), mz = -rng() * TRACK_LENGTH;
-    const mesa = new THREE.Mesh(mergeStaticMeshes([base, top]), mat);
-    mesa.position.set(mx, duneY(mx, mz), mz); // grounded on the dune field (r11)
-    group.add(mesa);
+    mesh.position.set(mx, duneY(mx, mz), mz); // grounded on the dune field (r11)
+    mesh.rotation.y = rng() * 3;
+    mesaParts[i % 2].push(mesh);
+  }
+  for (let mi = 0; mi < 2; mi++) {
+    const mat = new THREE.MeshStandardMaterial({ color: mesaBase[mi], roughness: 1, flatShading: true });
+    mesaMats.push(mat);
+    group.add(new THREE.Mesh(mergeStaticMeshes(mesaParts[mi]), mat));
   }
 
   // telegraph poles — all 12 poles+crossbars merge into ONE mesh (24 → 1)
@@ -555,9 +701,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     moonGlow.visible = name === 'night';
     moon.visible = name === 'night';
     vehicles.forEach((v) => {
-      // no light rides with the horse: night pools belong to the FIXED lantern
-      // poles and campfires only (critic r5: player halo had no visible source)
-      v.lanternLight.intensity = 0;
+      // r12: the lantern cage is itself an emissive source now, so the light
+      // riding with it is physical (critic r11 LOW #11) — no more halo with
+      // no illumination
+      v.lanternLight.intensity = tod.lanternLight ?? 0;
       // the cage is invisible in full daylight (unlit lantern prop — also saves
       // 5 draw calls in the day scene, §1.3) and glows only when dark (r9)
       v.cage.visible = tod.lanterns > 0.05;
@@ -621,7 +768,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       v.lowers[3].rotation.x = knee(v.gallop);
       v.lowers[1].rotation.x = knee(v.gallop + Math.PI);
       v.lowers[2].rotation.x = knee(v.gallop + Math.PI);
-      v.tail.rotation.x = 1.05 + Math.sin(now / 300 + v.wobble) * 0.15;
+      v.tail.rotation.x = 0.25 + Math.sin(now / 300 + v.wobble) * 0.12; // gentle swish (tail now hangs from the dock)
 
       // dust: speed + combo heat
       const heat = rs.comboHeat ?? 0;

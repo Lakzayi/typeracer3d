@@ -4,17 +4,44 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock } from './shared.js';
+import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock, superRing, loftSections } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
-// shared wheel geometries + mount points — one InstancedMesh pair per car
-// (2 draw calls) instead of 8 separate meshes (SPEC §1.3 draw-call budget)
-const WHEEL_GEO = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
-WHEEL_GEO.rotateZ(Math.PI / 2);
-const RIM_GEO = new THREE.CylinderGeometry(0.21, 0.21, 0.36, 10);
-RIM_GEO.rotateZ(Math.PI / 2);
-const WHEEL_POS = [[-1.03, -1.35], [1.03, -1.35], [-1.03, 1.4], [1.03, 1.4]];
+// r12 modeling pass — REAL wheels: the tire is a lathe with bulged sidewalls
+// and rounded shoulders (not a raw cylinder), the rim is a domed dish with
+// ten spokes + hub merged into one geometry. Both stay InstancedMesh pairs
+// (2 draw calls per car) and spin via the same per-frame matrix compose as
+// before (SPEC §1.3).
+const tireProfile = [
+  [0.215, -0.145], [0.30, -0.125], [0.355, -0.07], [0.372, -0.02],
+  [0.372, 0.02], [0.355, 0.07], [0.30, 0.125], [0.215, 0.145],
+].map(([r, y]) => new THREE.Vector2(r, y));
+const WHEEL_GEO = new THREE.LatheGeometry(tireProfile, 18);
+WHEEL_GEO.rotateZ(Math.PI / 2); // lathe axis Y → axle axis X
+const rimProfile = [
+  [0.02, -0.11], [0.15, -0.08], [0.19, -0.03],
+  [0.19, 0.03], [0.15, 0.08], [0.02, 0.11],
+].map(([r, y]) => new THREE.Vector2(r, y));
+const RIM_GEO0 = new THREE.LatheGeometry(rimProfile, 16);
+RIM_GEO0.rotateZ(Math.PI / 2);
+let RIM_GEO = RIM_GEO0;
+{ // spokes on BOTH faces (geometry is shared by left/right wheels, so the
+  // symmetric pair reads correctly from any side) + center hub
+  const spokes = [];
+  for (const face of [-0.075, 0.075]) {
+    for (let s = 0; s < 5; s++) {
+      const a = (s / 5) * Math.PI * 2;
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.016, 0.055));
+      sp.position.set(Math.cos(a) * 0.105, face, Math.sin(a) * 0.105);
+      sp.rotation.y = -a;
+      spokes.push(sp);
+    }
+  }
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.22, 10));
+  RIM_GEO = mergeStaticMeshes([new THREE.Mesh(RIM_GEO), ...spokes, hub]);
+}
+const WHEEL_POS = [[-0.86, -1.35], [0.86, -1.35], [-0.86, 1.4], [0.86, 1.4]];
 const _XAXIS = new THREE.Vector3(1, 0, 0);
 const _wq = new THREE.Quaternion();
 const _wm4 = new THREE.Matrix4();
@@ -22,6 +49,37 @@ const _wv = new THREE.Vector3();
 const _w1 = new THREE.Vector3(1, 1, 1);
 
 const expK = (k, dt) => 1 - Math.exp(-k * dt);
+
+/* car-paint surface break-up — mapped by the loft's UVs (u: around the ring,
+ * v: bow→stern). Door/hood shut-lines, a darker rocker band under the doors
+ * and faint metallic-flake noise give the body panels seams under full sun. */
+function carPaintTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 256, 256);
+  // rocker panel band — u≈0.5 is the ring bottom
+  const rg = ctx.createLinearGradient(0, 256 * 0.40, 0, 256 * 0.60);
+  rg.addColorStop(0, 'rgba(0,0,0,0)');
+  rg.addColorStop(0.5, 'rgba(0,0,0,0.22)');
+  rg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 256 * 0.40, 256, 256 * 0.20);
+  // shut lines (hood cut, door cuts) — only across the side/top arcs
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  for (const [v, u0, u1] of [[0.20, 0.02, 0.42], [0.40, 0.06, 0.44], [0.62, 0.56, 0.94], [0.40, 0.56, 0.94]]) {
+    ctx.fillRect(v * 256, u0 * 256, 2.5, (u1 - u0) * 256);
+  }
+  // flake noise
+  for (let i = 0; i < 700; i++) {
+    ctx.fillStyle = `rgba(${Math.random() > 0.5 ? '255,255,255' : '20,20,25'},0.05)`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1, 1);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 /* ---------------- time-of-day presets ---------------- */
 const TOD = {
@@ -47,17 +105,21 @@ const TOD = {
   night: {
     // near-black sky, silhouetted ground (critic r6: navy luma 32 vs refs 6–14).
     // r7: moon 0.5→0.32 — long near-black tree shadows contradicted a dim moon;
-    // ground now multiplies the textured albedo (cold desaturated, r7)
+    // ground now multiplies the textured albedo (cold desaturated, r7).
+    // r12: hemi 0.55→0.68 — the r11 render fell to pure black outside the lamp
+    // pools; a night photo keeps faint skyglow on the asphalt (LOW #7)
     skyTop: '#03050c', skyMid: '#081120', skyBot: '#12233f',
     fogDensity: 0.0030, exposure: 0.85, sunRig: [-26, 48, 34], sunDisc: 0,
     sunColor: '#8fb0ff', sunIntensity: 0.32, envSun: 0.12,
-    hemiSky: '#2a3f60', hemiGround: '#121a24', hemiIntensity: 0.55,
-    ambient: 0.04, lamps: 1.0, cones: 0.0, beam: 0.1, stars: 1.0,
+    hemiSky: '#31456a', hemiGround: '#141c26', hemiIntensity: 0.68,
+    ambient: 0.05, lamps: 1.0, cones: 0.0, beam: 0.1, stars: 1.0,
     // real low-beam ≈ 800–1500 cd; 60 cd is invisible after grazing-angle +
     // inverse-square + ACES (measured live: 60 cd → (0,1,6) on the road)
-    headlight: 800, tail: 1.2, moon: true, ground: '#3d4640', grass: '#3d4640',
+    headlight: 800, tail: 1.2, headGlow: 1.6, moon: true, ground: '#3d4640', grass: '#3d4640',
   },
 };
+TOD.day.headGlow = 0.02;
+TOD.sunset.headGlow = 0.5;
 
 function canvasTexture(draw, w = 256, h = 128) {
   const c = document.createElement('canvas');
@@ -81,61 +143,133 @@ function radialGlowTexture(color = '#ffd9a0') {
 
 function buildCar(color, { player = false } = {}) {
   const g = new THREE.Group();
-  // r11 paint: MeshPhysicalMaterial with a clearcoat lacquer layer (core three,
-  // no addons) — the r10 Standard paint still showed zero env response on the
-  // body panels (critic r10 #4). Physical paint = colored metallic base coat
-  // (metalness 0.55: F0 mixes the albedo into the reflection tint) + a clear
-  // dielectric coat (F0 0.04) that carries the sharp sky/sun glint exactly
-  // like real automotive lacquer.
+  // r12/r13 paint: clearcoat lacquer + panel/seam map from the loft UVs and a
+  // strong metallic base so full-sun shots read as GLOSS, not matte plastic
+  // (critic LOW #6): r13 sharpens the coat (rr 0.05) and pushes env response
+  // to 1.75 so the sky sheen on the horizontal panels is unmistakable
   const paint = new THREE.MeshPhysicalMaterial({
-    color, roughness: 0.38, metalness: 0.55,
-    clearcoat: 1.0, clearcoatRoughness: 0.12, envMapIntensity: 1.25,
+    color, map: carPaintTexture(), roughness: 0.3, metalness: 0.66,
+    clearcoat: 1.0, clearcoatRoughness: 0.05, envMapIntensity: 1.75,
   });
   const dark = new THREE.MeshStandardMaterial({ color: '#16181d', roughness: 0.95, metalness: 0.0, envMapIntensity: 0.05 });
-  const glass = new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.85, envMapIntensity: 1.3 });
+  // r12 iterate: real car glass reads DARK from outside (black interior + a
+  // sliver of sky reflection) — the pale tint read as a solid canopy
+  const glass = new THREE.MeshStandardMaterial({ color: '#2e4a5e', roughness: 0.08, metalness: 0.65, transparent: true, opacity: 0.78, envMapIntensity: 1.5 });
 
-  // body — wedge nose: the top front edge slopes down toward the lamps so the
-  // box reads as a car silhouette, not a raw brick (critic r6, §5.1). Static
-  // same-material parts (body/hood/trunk/roof) merge into ONE draw call.
-  const bodyGeo = new THREE.BoxGeometry(1.9, 0.55, 4.1);
-  {
-    const pos = bodyGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      if (pos.getY(i) > 0 && pos.getZ(i) < -1.2) {
-        pos.setY(i, pos.getY(i) * 0.72);
-        pos.setX(i, pos.getX(i) * 0.94);
-      }
+  /* ---- lower body: one loft — bumper nose → hood → beltline → deck → tail.
+   * Superellipse sections (k=3) give rounded body sides, the station heights
+   * give the three-box silhouette (hood drop, belt peak, trunk step). ONE
+   * indexed geometry ≈ 250 verts. */
+  const N = 20, K = 3.0;
+  const st = [ // [z, halfWidth, bottomY, topY]
+    [-2.075, 0.84, 0.36, 0.68],  // nose tip
+    [-2.04, 0.90, 0.31, 0.84],   // front face
+    [-1.85, 0.93, 0.30, 0.79],   // hood leading edge
+    [-1.55, 0.94, 0.30, 0.82],
+    [-1.15, 0.94, 0.30, 0.86],
+    [-0.70, 0.94, 0.30, 0.91],
+    [-0.45, 0.94, 0.30, 0.94],   // cowl
+    [0.25, 0.95, 0.30, 1.00],    // belt peak at the B-pillar
+    [0.90, 0.95, 0.30, 1.00],
+    [1.45, 0.93, 0.30, 0.97],    // rear deck
+    [1.90, 0.91, 0.30, 0.92],
+    [2.075, 0.85, 0.36, 0.86],   // tail face
+  ];
+  const bodyRings = st.map(([z, hw, y0, y1]) => superRing(0, (y0 + y1) / 2, z, hw, (y1 - y0) / 2, K, N));
+  const bodyGeo = loftSections(bodyRings, { capStart: true, capEnd: true });
+
+  // fender arches — half-torus flares over the four wheels; merged into the
+  // paint mesh (wheel arches were the top car mandate this round)
+  const arches = [];
+  for (const wz of [-1.35, 1.4]) {
+    for (const wx of [-0.90, 0.90]) {
+      const arch = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.085, 8, 18, Math.PI));
+      arch.rotation.y = Math.PI / 2; // arc into the ZY plane (over the wheel)
+      arch.position.set(wx, 0.38, wz);
+      arches.push(arch);
     }
-    bodyGeo.computeVertexNormals();
   }
-  const body = new THREE.Mesh(bodyGeo, paint);
-  body.position.y = 0.55; body.castShadow = true;
+  // paint roof cap + mirror shells ride with the paint mesh
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.06, 1.5), paint);
+  roof.position.set(0, 1.40, 0.42);
+  const mirrorShells = [];
+  for (const mx of [-0.98, 0.98]) {
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.09, 0.07), paint);
+    shell.position.set(mx, 1.00, -0.38);
+    const stalk = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.04), paint);
+    stalk.position.set(mx * 0.92, 0.985, -0.38);
+    stalk.rotation.z = mx > 0 ? -0.25 : 0.25;
+    mirrorShells.push(shell, stalk);
+  }
+  const bodyMesh = new THREE.Mesh(mergeStaticMeshes([
+    new THREE.Mesh(bodyGeo), ...arches, roof, ...mirrorShells,
+  ]), paint);
+  bodyMesh.castShadow = true;
+  g.add(bodyMesh);
 
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.28, 1.3), paint);
-  hood.position.set(0, 0.92, -1.2); hood.castShadow = true;
+  /* ---- greenhouse: tapered glass loft with a dark interior block so the
+   * tinted canopy reads as glass over a cabin, not an empty shell */
+  const gh = [ // [z, halfWidth, y0, y1]
+    [-0.50, 0.88, 0.92, 1.00],
+    [-0.28, 0.82, 0.94, 1.24],
+    [-0.02, 0.72, 1.04, 1.37],
+    [0.55, 0.70, 1.07, 1.41],
+    [0.95, 0.74, 1.03, 1.33],
+    [1.20, 0.82, 0.94, 1.05],
+  ];
+  const cabin = new THREE.Mesh(
+    loftSections(gh.map(([z, hw, y0, y1]) => superRing(0, (y0 + y1) / 2, z, hw, (y1 - y0) / 2, 2.6, N)), { capStart: true, capEnd: true }),
+    glass
+  );
+  cabin.castShadow = true;
+  const interior = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.42, 1.6), dark);
+  interior.position.set(0, 0.98, 0.32);
+  g.add(cabin, interior);
 
-  const trunk = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.2, 0.8), paint);
-  trunk.position.set(0, 0.92, 1.55); trunk.castShadow = true;
-
-  // beveled/tapered greenhouse — top verts pulled in and back (§5.1), plus a
-  // paint roof cap so the glass doesn't read as a full-width glasshouse (r4)
-  const cabinGeo = new THREE.BoxGeometry(1.55, 0.5, 1.9);
-  {
-    const pos = cabinGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      if (pos.getY(i) > 0) {
-        pos.setX(i, pos.getX(i) * 0.72);
-        pos.setZ(i, pos.getZ(i) * 0.78 - 0.18);
-      }
+  /* ---- trim: bumpers, grille, light housings, mirror glass, handles,
+   * exhaust tips — one merged dark mesh (1 draw) */
+  const trimParts = [];
+  const bumper = (front) => {
+    const sgn = front ? -1 : 1;
+    const rings = [
+      superRing(0, 0.51, sgn * 2.15, 0.86, 0.17, 3.2, N),
+      superRing(0, 0.51, sgn * 2.09, 0.91, 0.19, 3.2, N),
+      superRing(0, 0.51, sgn * 2.02, 0.92, 0.20, 3.2, N),
+    ];
+    return new THREE.Mesh(loftSections(rings, { capStart: front, capEnd: !front }));
+  };
+  trimParts.push(bumper(true), bumper(false));
+  const grille = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.16, 0.05));
+  grille.position.set(0, 0.55, -2.055);
+  trimParts.push(grille);
+  for (const lx of [-0.56, 0.56]) { // headlight + taillight Housings (lenses below)
+    const hh = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.16, 0.05));
+    hh.position.set(lx, 0.62, -2.05);
+    const th = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.15, 0.05));
+    th.position.set(lx, 0.68, 2.05);
+    trimParts.push(hh, th);
+  }
+  for (const mx of [-0.985, 0.985]) { // mirror glass faces rearward
+    const mg = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.015));
+    mg.position.set(mx, 1.0, -0.345);
+    trimParts.push(mg);
+  }
+  for (const hx of [-0.95, 0.95]) { // flush door handles
+    for (const hz of [0.05, 0.68]) {
+      const h = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.035, 0.15));
+      h.position.set(hx, 0.88, hz);
+      trimParts.push(h);
     }
-    cabinGeo.computeVertexNormals();
   }
-  const cabin = new THREE.Mesh(cabinGeo, glass);
-  cabin.position.set(0, 1.06, 0.25); cabin.castShadow = true;
-
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.07, 1.5), paint);
-  roof.position.set(0, 1.33, 0.07); roof.castShadow = true;
-  g.add(new THREE.Mesh(mergeStaticMeshes([body, hood, trunk, roof]), paint), cabin);
+  for (const ex of [-0.38, 0.38]) { // exhaust tips
+    const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.14, 8));
+    tip.rotation.x = Math.PI / 2;
+    tip.position.set(ex, 0.33, 2.12);
+    trimParts.push(tip);
+  }
+  const trimMesh = new THREE.Mesh(mergeStaticMeshes(trimParts), dark);
+  trimMesh.castShadow = true;
+  g.add(trimMesh);
 
   if (player) {
     const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.45), dark);
@@ -145,6 +279,21 @@ function buildCar(color, { player = false } = {}) {
     const finR = finL.clone(); finR.position.x = 0.7;
     g.add(new THREE.Mesh(mergeStaticMeshes([spoiler, finL, finR]), dark));
   }
+
+  // inset light fixtures — housings are in the trim mesh; the lenses sit
+  // slightly proud of the body face. Emissive follows the TOD (day: a pale
+  // glass fixture; night: the lamp actually glows)
+  const headMat = new THREE.MeshStandardMaterial({ color: '#e9e6da', roughness: 0.25, metalness: 0.3, emissive: '#fff6cc', emissiveIntensity: 0.02 });
+  const hl = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.11, 0.04), headMat);
+  hl.position.set(-0.56, 0.62, -2.045);
+  const hr = hl.clone(); hr.position.x = 0.56;
+  g.add(new THREE.Mesh(mergeStaticMeshes([hl, hr]), headMat));
+
+  const tailMat = new THREE.MeshStandardMaterial({ color: '#2a0508', emissive: '#ff2a33', emissiveIntensity: 0.15 });
+  const tl = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.10, 0.04), tailMat);
+  tl.position.set(-0.56, 0.68, 2.045);
+  const tr = tl.clone(); tr.position.x = 0.56;
+  g.add(new THREE.Mesh(mergeStaticMeshes([tl, tr]), tailMat));
 
   // chrome rim disc — face sits proud of the tire sidewall so the disc reads
   // from directly behind (critic r5)
@@ -162,58 +311,44 @@ function buildCar(color, { player = false } = {}) {
   }
   g.add(wheels, rims);
 
-  const hl = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#fff9c8' }));
-  hl.position.set(-0.55, 0.62, -2.06);
-  const hr = hl.clone(); hr.position.x = 0.55;
-  g.add(new THREE.Mesh(mergeStaticMeshes([hl, hr]), hl.material));
-
-  // taillights — physical emissive (SPEC §2: emissive only where physical, ≤2)
-  const tailMat = new THREE.MeshStandardMaterial({ color: '#2a0508', emissive: '#ff2a33', emissiveIntensity: 0.15 });
-  const tl = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.06), tailMat);
-  tl.position.set(-0.55, 0.66, 2.08);
-  const tr = tl.clone(); tr.position.x = 0.55;
-  g.add(new THREE.Mesh(mergeStaticMeshes([tl, tr]), tailMat));
-
   // only the player carries a real light (PLAN §1.2: 5 lights → 1) — a SpotLight
   // so the beam actually pools on the road ahead instead of glowing in a bubble.
-  // Wide penumbra: night pool gets soft edges (critic r4)
-  let light = null;
+  // Wide penumbra: night pool gets soft edges (critic r4). Bots skip the beam
+  // cones + pool entirely (opacity-0 draws were pure waste, §1.3).
+  let light = null, coneMat = null, beamPoolMat = null;
   if (player) {
     light = new THREE.SpotLight('#fff3d0', 0, 28, 0.5, 0.75, 2);
     light.position.set(0, 0.8, -2.2);
     light.target.position.set(0, 0, -14);
     light.castShadow = false;
     g.add(light, light.target);
+
+    // headlight beams — FrontSide so the bright interior is not visible through
+    // the cabin glass from behind (critic r2). Apex low at the lamp, tilted down.
+    coneMat = new THREE.MeshBasicMaterial({
+      color: '#ffedb0', transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.FrontSide,
+    });
+    const beamGeo = new THREE.ConeGeometry(0.3, 5.2, 12, 1, true);
+    beamGeo.translate(0, -2.6, 0);
+    const beamL = new THREE.Mesh(beamGeo, coneMat);
+    beamL.rotation.x = Math.PI / 2 - 0.14;
+    beamL.position.set(-0.56, 0.55, -2.06);
+    const beamR = new THREE.Mesh(beamGeo, coneMat);
+    beamR.rotation.x = Math.PI / 2 - 0.07;
+    beamR.position.set(0.56, 0.6, -2.06);
+    g.add(new THREE.Mesh(mergeStaticMeshes([beamL, beamR]), coneMat));
+
+    // low-beam pool — soft light lying ON the asphalt ahead of the lamps
+    beamPoolMat = new THREE.MeshBasicMaterial({
+      map: radialGlowTexture('#ffe9b8'), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const beamPool = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 11), beamPoolMat);
+    beamPool.rotation.x = -Math.PI / 2;
+    beamPool.position.set(0, 0.05, -7.5);
+    g.add(beamPool);
   }
-
-  // headlight beams — FrontSide so the bright interior is not visible through
-  // the cabin glass from behind (critic r2: floating white drops).
-  // Apex low at the lamp, slim radius, tilted down at the road (critic r4:
-  // beams used to exit at the roof corners with a hard-edged pool)
-  const coneMat = new THREE.MeshBasicMaterial({
-    color: '#ffedb0', transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.FrontSide,
-  });
-  const beamGeo = new THREE.ConeGeometry(0.3, 5.2, 12, 1, true);
-  beamGeo.translate(0, -2.6, 0); // apex at origin, base 5.2 ahead (−Z after rotation)
-  const beamL = new THREE.Mesh(beamGeo, coneMat);
-  beamL.rotation.x = Math.PI / 2 - 0.14; // spread forward, tilted down at the road
-  beamL.position.set(-0.55, 0.55, -2.06);
-  const beamR = new THREE.Mesh(beamGeo, coneMat);
-  beamR.rotation.x = Math.PI / 2 - 0.07;
-  beamR.position.set(0.55, 0.6, -2.06);
-  g.add(new THREE.Mesh(mergeStaticMeshes([beamL, beamR]), coneMat));
-
-  // low-beam pool — soft light lying ON the asphalt ahead of the lamps so the
-  // beams read as road illumination, not floating bubbles (critic r6)
-  const beamPoolMat = new THREE.MeshBasicMaterial({
-    map: radialGlowTexture('#ffe9b8'), transparent: true, opacity: 0,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  const beamPool = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 11), beamPoolMat);
-  beamPool.rotation.x = -Math.PI / 2;
-  beamPool.position.set(0, 0.05, -7.5);
-  g.add(beamPool);
 
   // exhaust flame (combo heat) — points backwards (+Z)
   const flameMat = new THREE.MeshBasicMaterial({
@@ -230,7 +365,7 @@ function buildCar(color, { player = false } = {}) {
   flameCore.position.set(0, 0.45, 2.2);
   g.add(flameCore);
 
-  return { group: g, wheels, rims, coneMat, beamPoolMat, flame, flameCore, light, tailMat };
+  return { group: g, wheels, rims, coneMat, beamPoolMat, flame, flameCore, light, tailMat, headMat };
 }
 
 function makeLabel(name, colorCss) {
@@ -377,18 +512,21 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
 
   // roadside trees + rocks — instanced template matrices, then merged into one
   // regular Mesh each (InstancedMesh never enters the shadow depth pass in
-  // this three build, so merged Meshes are what make tree shadows real)
+  // this three build, so merged Meshes are what make tree shadows real).
+  // r12: canopy = three NOISE-JITTERED cone blobs (position-keyed displacement
+  // makes every lobe lumpy, so trees stop reading as identical clean cones)
   const nTrees = 130;
   const trunkGeo = new THREE.CylinderGeometry(0.22, 0.3, 1.6, 6);
-  // crown = two stacked blobs (wide skirt + narrower rotated top) so trees stop
-  // reading as identical flat cones (critic r6, §5.3)
   const crownMat = new THREE.MeshStandardMaterial({ color: '#2f7d38', roughness: 1 });
-  const crownBlobA = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.3, 7), crownMat);
+  const crownBlobA = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(1.5, 2.3, 8), { amp: 0.17, seed: 311, freq: 2.6 }));
   crownBlobA.position.y = -0.6;
-  const crownBlobB = new THREE.Mesh(new THREE.ConeGeometry(1.05, 2.1, 7), crownMat);
+  const crownBlobB = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(1.05, 2.1, 8), { amp: 0.17, seed: 312, freq: 2.6 }));
   crownBlobB.position.y = 0.85;
   crownBlobB.rotation.y = 0.5;
-  const crownGeo = mergeStaticMeshes([crownBlobA, crownBlobB]);
+  const crownBlobC = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(0.7, 1.5, 7), { amp: 0.18, seed: 313, freq: 2.8 }));
+  crownBlobC.position.set(0.35, 1.75, -0.2);
+  crownBlobC.rotation.y = 1.1;
+  const crownGeo = mergeStaticMeshes([crownBlobA, crownBlobB, crownBlobC]);
   const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: '#7a5230', roughness: 1 }), nTrees);
   const crowns = new THREE.InstancedMesh(crownGeo, crownMat, nTrees);
   const qId = new THREE.Quaternion();
@@ -431,12 +569,14 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(rockMesh);
   rocks.dispose();
 
-  // distant mountains — 12 separate Meshes merged into one (12 → 1 draw calls)
+  // distant mountains — 12 separate Meshes merged into one (12 → 1 draw calls).
+  // r12: noise-jittered flanks — clean 5-sided pyramids read as low-poly props
+  // even at distance (modeling mandate: real silhouettes)
   const mountainMeshes = [];
   const mountainMat = new THREE.MeshStandardMaterial({ color: '#6f87a8', roughness: 1, flatShading: true });
   for (let i = 0; i < 12; i++) {
     const h = 40 + rng() * 70;
-    const mt = new THREE.Mesh(new THREE.ConeGeometry(30 + rng() * 40, h, 5), mountainMat);
+    const mt = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(30 + rng() * 40, h, 7), { amp: 0.13, seed: 70 + i, freq: 1.6 }), mountainMat);
     const side = i % 2 ? 1 : -1;
     mt.position.set(side * (130 + rng() * 160), h / 2 - 4, -rng() * TRACK_LENGTH);
     mountainMeshes.push(mt);
@@ -651,10 +791,11 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     lampHeadMat.color.set(tod.lamps > 0.3 ? '#ffe6b0' : '#8b9099');
     lampHeadMat.toneMapped = tod.lamps <= 0.3; // night head = brightest element (critic r5)
     vehicles.forEach((v) => {
-      v.coneMat.opacity = tod.cones; // r7: 0 in every TOD — the milky floating
-      // cones are gone; the beam pool + SpotLight carry the road light alone
-      v.beamPoolMat.opacity = tod.beam * 4.5; // pool lying ON the asphalt (r6/r7)
+      if (v.coneMat) v.coneMat.opacity = tod.cones; // player only (r12: bots
+      // never had a light source — the opacity-0 cones were wasted draws)
+      if (v.beamPoolMat) v.beamPoolMat.opacity = tod.beam * 4.5;
       v.tailMat.emissiveIntensity = tod.tail;
+      v.headMat.emissiveIntensity = tod.headGlow ?? 0.02; // inset fixture glows at night
       if (v.light) v.light.intensity = tod.headlight; // bots: emissive quads only
     });
   }

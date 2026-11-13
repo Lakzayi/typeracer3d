@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock, superRing, loftSections, makeDunes, displaceGroundPlane } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -33,13 +33,17 @@ const TOD = {
     // dusk river photo: slate-blue sky above, warm band ONLY at the horizon,
     // dark water, warm land in shade. Saturation down everywhere; the golden
     // path lives in the glitter stripe + env glint near the sun.
-    skyTop: '#232a44', skyMid: '#c97a4e', skyBot: '#f2b878', skyLow: '#ffd9a0',
+    // r13 (MED #1 again: the r12 disc still floated ~4° above the horizon and
+    // its core still clipped toward cream): elevation 2.3° — the disc sits IN
+    // the haze band at the waterline — uSunCore 1.7 with a deeper '#ff9c4a'
+    // tint keeps the core AMBER (ACES maps 1.7×tint well below white), and the
+    // upper sky drops to twilight values so the whole frame agrees.
+    skyTop: '#1c2340', skyMid: '#a86a52', skyBot: '#f2b878', skyLow: '#ffd9a0',
     fog: '#c08a62', fogDensity: 0.0017, exposure: 0.85,
-    // sun just over the canyon rim: elevation ~8° (critic r6: sun sat too high)
-    sunRig: [-28, 8, -52], sunDisc: 0.9, sunTint: '#ffcf9a', envSun: 0.7,
-    sunColor: '#ffcf9e', sunIntensity: 1.5,
-    hemiSky: '#9a8a96', hemiGround: '#33302e', hemiIntensity: 0.34,
-    ambient: 0.0, lanterns: 0.6, stars: 0.25, water: '#6d8598', waterEnv: 0.8, navLights: 0.8,
+    sunRig: [-32, 2.6, -56], sunDisc: 0.9, sunCore: 1.7, sunTint: '#ff9c4a', envSun: 0.6,
+    sunColor: '#ffb271', sunIntensity: 1.35,
+    hemiSky: '#8f8090', hemiGround: '#33302e', hemiIntensity: 0.34,
+    ambient: 0.0, lanterns: 0.6, stars: 0.3, water: '#6d8598', waterEnv: 0.8, navLights: 0.8,
     headlight: 14,
   },
   night: {
@@ -54,73 +58,157 @@ const TOD = {
 
 function buildBoat(color, { player = false } = {}) {
   const g = new THREE.Group();
-  const hullMat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.15, envMapIntensity: 0.6 });
+  const hullMat = new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.12, envMapIntensity: 0.7 });
   const deckMat = new THREE.MeshStandardMaterial({ color: '#e8dcc4', roughness: 0.9 });
   const darkMat = new THREE.MeshStandardMaterial({ color: '#20242c', roughness: 0.8 });
 
-  // hull: box tapered toward the stern + chined at the waterline (PLAN §5.2),
-  // then a flattened cone prow (-Z). Static same-material parts are MERGED into
-  // one mesh each — 5 boats × ~19 draws blew the §1.3 draw-call budget.
-  const hullGeo = new THREE.BoxGeometry(1.7, 0.5, 3.4);
-  {
-    const pos = hullGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const z = pos.getZ(i);
-      if (z > 1.5) pos.setX(i, pos.getX(i) * 0.6); // stern narrows hard (critic r6)
-      if (z < -1.5) pos.setX(i, pos.getX(i) * 1.12); // bow widens (§5.2)
-      if (pos.getY(i) < 0) pos.setX(i, pos.getX(i) * 0.8); // chine toward the waterline
-    }
-    hullGeo.computeVertexNormals();
-  }
-  const hull = new THREE.Mesh(hullGeo, hullMat);
-  hull.position.y = 0.42; hull.castShadow = true;
-  const bow = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.5, 4), hullMat);
-  bow.rotation.x = -Math.PI / 2;
-  bow.rotation.z = Math.PI / 4;
-  bow.position.set(0, 0.42, -2.45);
-  bow.scale.y = 0.3; // flatten cone into a long prow
-  bow.castShadow = true;
-  const hullMesh = new THREE.Mesh(mergeStaticMeshes([hull, bow]), hullMat);
+  /* ---- hull: a real runabout loft (r12 modeling pass). Eight stations from
+   * stem to transom; each ring runs keel → bilge → CHINE (hard turn, visible
+   * strake line) → flared topside → gunwale, then mirrors. The gunwale heights
+   * carry the SHEER LINE: highest at the bow, dipping amidships, sweeping
+   * down to the stern — the silhouette that separates "boat" from "box". */
+  const ST = [ // [z, halfWidth@gunwale, halfWidth@chine, yGun, yChine, yKeel]
+    [-2.65, 0.03, 0.02, 0.78, 0.44, 0.42], // stem tip
+    [-2.30, 0.30, 0.22, 0.74, 0.38, 0.28],
+    [-1.80, 0.55, 0.44, 0.70, 0.34, 0.16],
+    [-1.20, 0.72, 0.60, 0.70, 0.33, 0.10],
+    [-0.50, 0.83, 0.72, 0.71, 0.33, 0.08],
+    [0.30, 0.85, 0.75, 0.71, 0.33, 0.08],
+    [1.00, 0.80, 0.71, 0.68, 0.34, 0.10],
+    [1.75, 0.72, 0.64, 0.64, 0.36, 0.14],  // transom
+  ];
+  const hullRing = ([z, hg, hc, yg, yc, yk]) => {
+    const fx = (hg + hc) / 2 + 0.03, fy = (yg + yc) / 2 + 0.02; // topside flare
+    const bx = hc * 0.45, by = (yc + yk) / 2;                   // bilge
+    return [
+      [0, yk, z], [bx, by, z], [hc, yc, z], [fx, fy, z], [hg, yg, z],
+      [-hg, yg, z], [-fx, fy, z], [-hc, yc, z], [-bx, by, z],
+    ];
+  };
+  const hullMesh = new THREE.Mesh(
+    loftSections(ST.map(hullRing), { capStart: true, capEnd: true }),
+    hullMat
+  );
+  hullMesh.castShadow = true;
   g.add(hullMesh);
-  // fenders: dark rub-rail beads along the waterline contact + outboard motor
-  const fenderGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.9, 8);
-  const fenderL = new THREE.Mesh(fenderGeo, darkMat);
-  fenderL.rotation.z = Math.PI / 2;
-  fenderL.position.set(-0.88, 0.3, 0);
-  const fenderR = fenderL.clone(); fenderR.position.x = 0.88;
-  const motor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.3), darkMat);
-  motor.position.set(0, 0.62, 1.85);
-  g.add(new THREE.Mesh(mergeStaticMeshes([fenderL, fenderR, motor]), darkMat));
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.12, 2.4), deckMat);
-  deck.position.set(0, 0.72, 0.2);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 0.8), deckMat);
-  cabin.position.set(0, 0.95, 0.9); cabin.castShadow = true;
-  g.add(new THREE.Mesh(mergeStaticMeshes([deck, cabin]), deckMat));
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.06, 0.86), hullMat);
-  roof.position.set(0, 1.17, 0.9);
-  g.add(roof);
 
-  // windshield + tiny driver
-  const shield = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.34, 0.08), new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.1, transparent: true, opacity: 0.85 }));
-  shield.position.set(0, 1.02, -0.7);
+  // deck follows the sheer (crowned strips between the gunwales) — indexed
+  // strip builder, one geometry, deckMat
+  const deckPos = [], deckIdx = [];
+  const DCOL = 5; // columns across (-1..1)
+  for (let s = 0; s < ST.length; s++) {
+    const [z, hg, , yg] = ST[s];
+    for (let c = 0; c <= DCOL; c++) {
+      const t = c / DCOL * 2 - 1; // -1 port … +1 starboard
+      deckPos.push(t * (hg - 0.02), yg + 0.012 + (1 - Math.abs(t)) * 0.035, z);
+    }
+  }
+  for (let s = 0; s < ST.length - 1; s++) {
+    for (let c = 0; c < DCOL; c++) {
+      const a = s * (DCOL + 1) + c, b = (s + 1) * (DCOL + 1) + c;
+      deckIdx.push(a, b, b + 1, a, b + 1, a + 1);
+    }
+  }
+  const deckGeo = new THREE.BufferGeometry();
+  deckGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(deckPos), 3));
+  deckGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(deckPos.length / 3 * 2).fill(0.5), 2));
+  deckGeo.setIndex(deckIdx);
+  deckGeo.computeVertexNormals();
+  const deckMesh = new THREE.Mesh(deckGeo, deckMat);
+  deckMesh.castShadow = true;
+  g.add(deckMesh);
+
+  /* ---- dark trim: rub-rail tube along the sheer (both sides), outboard
+   * motor (cowling + lower unit + tiller), windscreen frame, cleats — ONE
+   * merged mesh (1 draw) */
+  const trimParts = [];
+  for (const side of [-1, 1]) {
+    const curve = new THREE.CatmullRomCurve3(
+      ST.map(([z, hg, , yg]) => new THREE.Vector3(side * (hg + 0.015), yg - 0.015, z))
+    );
+    trimParts.push(new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.032, 6), darkMat));
+  }
+  // outboard on the transom: cowling (rounded loft) + lower unit + tiller arm
+  const cowl = new THREE.Mesh(loftSections([
+    superRing(0, 1.0, 1.88, 0.17, 0.15, 2.5, 10),
+    superRing(0, 1.06, 1.97, 0.20, 0.17, 2.5, 10),
+    superRing(0, 1.08, 2.06, 0.18, 0.14, 2.5, 10),
+  ], { capStart: true, capEnd: true }), darkMat);
+  trimParts.push(cowl);
+  const lowerUnit = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.55, 0.11), darkMat);
+  lowerUnit.position.set(0, 0.72, 2.02);
+  const skeg = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.16), darkMat);
+  skeg.position.set(0, 0.42, 2.06);
+  trimParts.push(lowerUnit, skeg);
+  const tiller = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.4), darkMat);
+  tiller.position.set(0.17, 1.02, 2.2);
+  tiller.rotation.x = -0.5;
+  trimParts.push(tiller);
+  // framed windscreen: glass panel + top rail + side posts
+  const frameBar = (w, h, d, x, y, z, rx = 0) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), darkMat);
+    b.position.set(x, y, z); b.rotation.x = rx;
+    return b;
+  };
+  trimParts.push(
+    frameBar(0.98, 0.035, 0.035, 0, 1.075, -0.62, -0.18), // top rail
+    frameBar(0.035, 0.34, 0.035, -0.5, 0.92, -0.585, -0.18), // port post
+    frameBar(0.035, 0.34, 0.035, 0.5, 0.92, -0.585, -0.18),  // starboard post
+    frameBar(0.9, 0.03, 0.05, 0, 0.76, -0.2), // console top edge
+  );
+  // bow cleats
+  for (const cz of [-1.35]) {
+    for (const cx of [-0.34, 0.34]) {
+      const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.035), darkMat);
+      cleat.position.set(cx, ST[2][3] + 0.05, cz);
+      trimParts.push(cleat);
+    }
+  }
+  const trimMesh = new THREE.Mesh(mergeStaticMeshes(trimParts), darkMat);
+  trimMesh.castShadow = true;
+  g.add(trimMesh);
+
+  // windscreen glass — tilted panel inside the frame
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.30, 0.025), new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.1, transparent: true, opacity: 0.85, envMapIntensity: 1.2 }));
+  shield.position.set(0, 0.95, -0.6);
+  shield.rotation.x = -0.18;
   g.add(shield);
+
+  // console + bench seats on the deck (fore-aft cockpit layout)
+  const seats = [];
+  const bench1 = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.09, 0.34), deckMat);
+  bench1.position.set(0, 0.80, 0.55);
+  const bench2 = bench1.clone(); bench2.position.set(0, 0.79, 1.25);
+  const benchBack = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.3, 0.07), deckMat);
+  benchBack.position.set(0, 0.95, 1.42);
+  const consoleBox = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.26, 0.36), deckMat);
+  consoleBox.position.set(0, 0.87, -0.22);
+  const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.014, 6, 14), darkMat);
+  wheel.position.set(0, 1.0, -0.4);
+  wheel.rotation.x = 1.15;
+  seats.push(bench1, bench2, benchBack, consoleBox);
+  const seatsMesh = new THREE.Mesh(mergeStaticMeshes(seats), deckMat);
+  seatsMesh.castShadow = true;
+  g.add(seatsMesh, wheel);
+
+  // tiny driver seated on the aft bench
   const driver = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.5, 0.3), new THREE.MeshStandardMaterial({ color: player ? '#ff4757' : '#2b3242', roughness: 0.9 }));
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.46, 0.26), new THREE.MeshStandardMaterial({ color: player ? '#ff4757' : '#2b3242', roughness: 0.9 }));
   torso.position.y = 0.25;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshStandardMaterial({ color: '#e6b98f', roughness: 0.9 }));
-  head.position.y = 0.62;
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: player ? '#ffffff' : '#39404e', roughness: 0.6 }));
-  helmet.position.y = 0.66;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), new THREE.MeshStandardMaterial({ color: '#e6b98f', roughness: 0.9 }));
+  head.position.y = 0.6;
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: player ? '#ffffff' : '#39404e', roughness: 0.6 }));
+  helmet.position.y = 0.64;
   driver.add(torso, head, helmet);
-  driver.position.set(0, 0.78, 0.35);
+  driver.position.set(0, 0.88, 0.62);
   g.add(driver);
 
   // navigation lights (port red / starboard green) — shine at dusk/night
   const navMat = (c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.3 });
-  const navL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), navMat('#ff5252'));
-  navL.position.set(-0.85, 0.75, -0.2);
-  const navR = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 4), navMat('#3ddc84'));
-  navR.position.set(0.85, 0.75, -0.2);
+  const navL = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), navMat('#ff5252'));
+  navL.position.set(-0.62, 0.72, -1.55);
+  const navR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), navMat('#3ddc84'));
+  navR.position.set(0.62, 0.72, -1.55);
   g.add(navL, navR);
 
   // only the player carries a real light (PLAN §1.2) — same contract as the
@@ -166,7 +254,7 @@ function buildBoat(color, { player = false } = {}) {
   const wakeMat = new THREE.MeshBasicMaterial({ map: wakeTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
   const wake = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 7), wakeMat);
   wake.rotation.x = -Math.PI / 2;
-  wake.position.set(0, 0.46, 4.4);
+  wake.position.set(0, 0.455, 4.4);
   g.add(wake);
 
   // contact shadow — dark radial footprint the hull casts on the water
@@ -180,29 +268,34 @@ function buildBoat(color, { player = false } = {}) {
     ctx.fillRect(0, 0, w, h);
   }, 128, 128);
   const contact = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.6, 5.4),
+    new THREE.PlaneGeometry(2.6, 5.6),
     new THREE.MeshBasicMaterial({ map: shadowTex, transparent: true, opacity: 0.85, depthWrite: false })
   );
   contact.rotation.x = -Math.PI / 2;
-  contact.position.set(0, 0.445, 0.6);
+  contact.position.set(0, 0.44, 0.3);
   g.add(contact);
 
-  // hull waterline churn — small foam ring where motor and transom meet the
-  // water; a real, always-present source for the glow (critic r5)
+  // r12 waterline foam ring (critic r11 LOW #9: idle hull read pasted onto
+  // the surface) — a soft elliptical BAND hugging the hull sides, always on.
+  // Band (not a filled disc) so it never washes out the contact shadow.
   const foamTex = canvasTexture((ctx, w, h) => {
-    const g3 = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
-    g3.addColorStop(0, 'rgba(240,250,255,0.5)');
-    g3.addColorStop(0.6, 'rgba(240,250,255,0.18)');
-    g3.addColorStop(1, 'rgba(240,250,255,0)');
-    ctx.fillStyle = g3;
-    ctx.fillRect(0, 0, w, h);
-  }, 96, 96);
-  const foam = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.5, 2.2),
-    new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false })
-  );
+    const img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const nx = (x - w / 2) / (w / 2), ny = (y - h / 2) / (h / 2);
+      const d = Math.hypot(nx, ny);
+      const band = Math.max(0, 1 - Math.abs(d - 0.72) / 0.24); // soft ring
+      const speck = Math.random() < 0.3 ? 0.55 + Math.random() * 0.45 : 0.85; // foam breakup
+      const a = Math.pow(band, 1.6) * speck;
+      const i = (y * w + x) * 4;
+      img.data[i] = 242; img.data[i + 1] = 250; img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * 210);
+    }
+    ctx.putImageData(img, 0, 0);
+  }, 128, 128);
+  const foamMat = new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false });
+  const foam = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 5.9), foamMat);
   foam.rotation.x = -Math.PI / 2;
-  foam.position.set(0, 0.452, 2.7);
+  foam.position.set(0, 0.428, 0.1);
   g.add(foam);
 
   // combo spray: burst cone behind the boat
@@ -212,7 +305,7 @@ function buildBoat(color, { player = false } = {}) {
   spray.position.set(0, 0.6, 3.0);
   g.add(spray);
 
-  return { group: g, wake, wakeMat, spray, sprayMat, navL, navR, navMats: [navL.material, navR.material], light };
+  return { group: g, wake, wakeMat, foamMat, spray, sprayMat, navL, navR, navMats: [navL.material, navR.material], light };
 }
 
 export function create(world, { racers, seed, timeOfDay = 'day' }) {
@@ -236,8 +329,21 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   bankPBR.map.repeat.set(85, 360);
   bankPBR.normalMap.repeat.set(85, 360);
   bankPBR.roughMap.repeat.set(85, 360);
+  // r13: GENTLE BANK UNDULATION — the r12 critic's "rocks' grounding relies on
+  // symmetric dark base patches" was half a flat-plane problem: perfectly flat
+  // sand makes every rock read as pasted on. ±1.3m dunes fading in from the
+  // waterline (corridor + wet-sand strips stay flat); cliffs/poles ground via
+  // the same bankY sampler
+  const bankDunes = makeDunes(5170, { cell: 120, octaves: 3, gain: 0.55 });
+  const bankFade = (x) => { // 0 at the waterline, full from |x|≈24
+    const t = Math.min(1, Math.max(0, (Math.abs(x) - 7.5) / 16));
+    return t * t * (3 - 2 * t);
+  };
+  const bankY = (x, z) => (bankDunes(x, z) - 0.5) * 2 * 1.3 * bankFade(x);
+  const bankGeo = new THREE.PlaneGeometry(700, 3000, 72, 200);
+  displaceGroundPlane(bankGeo, bankDunes, { amp: 1.3, fadeFn: bankFade });
   const banks = new THREE.Mesh(
-    new THREE.PlaneGeometry(700, 3000),
+    bankGeo,
     new THREE.MeshStandardMaterial({
       color: '#ffffff', map: bankPBR.map, normalMap: bankPBR.normalMap,
       roughnessMap: bankPBR.roughMap, roughness: 1, envMapIntensity: 0.2,
@@ -271,8 +377,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // • calmer baked ripples (strength 6.0→3.2, normalScale 0.6): the r10
   //   speckle read as noisy plastic; real river chop is subtle at this distance
   // • roughnessMap 0.05–0.15: tighter gloss band so glints stay crisp
+  // r12 (critic r11 LOW #8: glints broke into salt-sprinkle blotches):
+  // stretch 6 anisotropizes the fbm cells ALONG the river (texture v → world
+  // z), so the roughness/ripple streaks — and therefore the sun glints —
+  // elongate toward the viewer like a real glitter path instead of sprinkling
   const waterPBR = makeGroundPBR({
-    seed: 9, octaves: 5, firstLattice: 3, gain: 0.6, normalStrength: 3.2,
+    seed: 9, octaves: 5, firstLattice: 3, gain: 0.6, stretch: 9, normalStrength: 3.2,
     color: () => [255, 255, 255], // albedo unused — metal tint comes from color
     rough: (h) => 0.05 + h * 0.1,
   });
@@ -318,6 +428,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // r11: base dropped toward gray-brown — under the orange sunset sun the old
   // #8a6f56 went full mars-red (part of the r10 "everything orange" failure).
   // Vertices jittered so the clean dodecahedra read as weathered rock.
+  // r13: every cliff GROUNDED on the displaced bank (bankY at its x,z) so the
+  // undulating sand genuinely wraps their bases
   const cliffMat = new THREE.MeshStandardMaterial({ color: '#77624e', roughness: 1, flatShading: true });
   const cliffMeshes = [];
   for (let i = 0; i < 90; i++) {
@@ -327,13 +439,36 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     const s = 2.5 + rng() * 6;
     const rockGeo = jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.22, seed: 40 + i });
     const rock = new THREE.Mesh(rockGeo, cliffMat);
-    rock.position.set(x, s * 0.55, z);
+    rock.position.set(x, 0.35 + bankY(x, z) + s * 0.55, z);
     rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     cliffMeshes.push(rock);
   }
   const cliffs = new THREE.Mesh(mergeStaticMeshes(cliffMeshes), cliffMat);
   cliffs.castShadow = true;
   group.add(cliffs);
+
+  // r13 shore poles — mooring stakes driven into the sand near the waterline
+  // on BOTH banks (MED #2: "the shoreline lacks directional cast shadows where
+  // the eye expects long thin ones"). The near dock posts cast onto the METAL
+  // water where a shadow is invisible (metalness 0.9 ≈ no diffuse), but these
+  // stand on DIFFUSE sand: under the 13° sun a 2m pole lays a ~8m thin shadow.
+  // One merged mesh (1 draw call, §1.3).
+  const shorePoleMat = new THREE.MeshStandardMaterial({ color: '#5d4a33', roughness: 1 });
+  const shorePoleParts = [];
+  for (let i = 0; i < 16; i++) {
+    const side = i % 2 ? 1 : -1;
+    const px = side * (7.7 + rng() * 1.8);
+    const pz = 8 - rng() * 260 - (i > 7 ? 260 : 0);
+    const ph = 1.1 + rng() * 1.3;
+    const pr = 0.16 + rng() * 0.08;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(pr * 0.75, pr, ph, 6), shorePoleMat);
+    pole.position.set(px, 0.35 + bankY(px, pz) + ph / 2 - 0.12, pz);
+    pole.rotation.z = side * (rng() * 0.09); // slight lean
+    shorePoleParts.push(pole);
+  }
+  const shorePoles = new THREE.Mesh(mergeStaticMeshes(shorePoleParts), shorePoleMat);
+  shorePoles.castShadow = true; // flags on the source parts do NOT survive the merge
+  group.add(shorePoles);
 
   // reeds near the waterline — 120 blades merged into ONE mesh (120 → 1)
   const reedMat = new THREE.MeshStandardMaterial({ color: '#4d7d3a', roughness: 1 });
@@ -393,14 +528,17 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     const dock = new THREE.Mesh(new THREE.BoxGeometry(5, 0.25, 3), dockMat);
     dock.position.set(side * 8.6, 0.5, z);
     dock.castShadow = true;
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 3.4, 6), poleMat);
-    post.position.set(side * 7.2, 2.2, z);
+    // r13: post moved to the LAND side of the dock — on the water side its
+    // shadow fell on the metal river plane where a shadow is invisible
+    // (metalness 0.9 has ~no diffuse); on sand it lays a long thin shadow
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.19, 4.2, 8), poleMat);
+    post.position.set(side * 10.2, 2.45, z);
     post.castShadow = true;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), lampHeadMat);
-    head.position.set(side * 7.2, 3.9, z);
+    head.position.set(side * 10.2, 4.7, z);
     const pool = new THREE.Mesh(new THREE.PlaneGeometry(10, 14), poolMat);
     pool.rotation.x = -Math.PI / 2;
-    pool.position.set(side * 6.6, 0.46, z);
+    pool.position.set(side * 8.4, 0.46, z);
     dockParts.push(dock); postParts.push(post); headParts.push(head); poolParts.push(pool);
   }
   const docks = new THREE.Mesh(mergeStaticMeshes(dockParts), dockMat); docks.castShadow = true;
@@ -601,6 +739,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       // stopped (0.16 floor so a stationary boat still reads as IN water)
       v.wakeMat.opacity = Math.max(0.16, Math.min(0.42, s01 * 0.42));
       v.wake.scale.set(0.8 + s01 * 0.6, 0.6 + s01 * 1.1, 1);
+      // waterline foam ring breathes with the bob (idle hull stays IN the water)
+      v.foamMat.opacity = 0.62 + Math.sin(now / 700 + v.wobble) * 0.12 + s01 * 0.15;
       const heat = rs.comboHeat ?? 0;
       const flicker = 0.8 + Math.random() * 0.35;
       v.spray.scale.set(0.5 + heat * 1.1, heat * flicker, 0.5 + heat * 1.1);

@@ -312,6 +312,8 @@ export function createSkyDome(radius = 620) {
     uSunDir:  { value: new THREE.Vector3(0, 1, 0) },
     uSunTint: { value: new THREE.Color('#fff2d8') },
     uSunI:    { value: 0 },
+    uSunCore: { value: 5.5 }, // HDR disc gain — low suns are AMBER (5.5×tint
+                              // tone-maps to near-white; 2.2 keeps color)
   };
   const mesh = new THREE.Mesh(
     new THREE.SphereGeometry(radius, 32, 20),
@@ -328,7 +330,7 @@ export function createSkyDome(radius = 620) {
         }`,
       fragmentShader: `
         uniform vec3 uZenith, uMid, uHorizon, uSunTint, uSunDir;
-        uniform float uSunI;
+        uniform float uSunI, uSunCore;
         varying vec3 vDir;
         void main() {
           vec3 d = normalize(vDir);
@@ -348,7 +350,9 @@ export function createSkyDome(radius = 620) {
           float halo = pow(max(c, 0.0), 400.0) * 0.12;    // compact glare — the
           // old pow(150)*0.25 + wide gradient kept a pale 15° wash around the
           // sun (probe: luma 0.87 at 2-4°, 0.6 plateau to 24°; r11 re-tune)
-          col += uSunTint * (disc * 5.5 + corona * 1.1 + halo) * uSunI;
+          // r12: uSunCore — 5.5×tint ACES-maps to a white-cream core (r11
+          // boat-sunset MED); a low sun keeps its amber at ~2.2×
+          col += uSunTint * (disc * uSunCore + corona * 1.1 + halo) * uSunI;
           gl_FragColor = vec4(col, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -368,6 +372,7 @@ export function setSkyDome(sky, tod) {
   u.uSunDir.value.set(tod.sunRig[0] / len, tod.sunRig[1] / len, tod.sunRig[2] / len);
   u.uSunTint.value.set(tod.sunTint ?? '#fff2d8');
   u.uSunI.value = tod.sunDisc ?? 0;
+  u.uSunCore.value = tod.sunCore ?? 5.5;
 }
 
 /* Low sun disc for sunset skies — the visible source behind the warm light
@@ -469,6 +474,108 @@ export function mergeStaticMeshes(meshes) {
     mesh.geometry.dispose();
   }
   return g;
+}
+
+/* ---------------- vehicle-grade loft toolkit (r12 modeling pass) -----------
+ * Real silhouettes come from SWEPT cross-sections, not boxes: a car body is a
+ * superellipse ring extruded along a curved height profile, a hull is shaped
+ * stations lofted bow→transom, a neck is a circle swept along an arc with a
+ * taper. All helpers build indexed BufferGeometry with smooth normals inside a
+ * ring — hard creases (chines, beltlines) are made by the caller DUPLICATING a
+ * ring at the same depth, which breaks vertex sharing exactly there. Built
+ * once at create(), never per frame (SPEC §1.3). */
+
+/* One closed ring of `n` [x,y,z] points on a superellipse
+ * (|x/rx|^k + |y/ry|^k = 1 — k=2 ellipse, k≈3 rounded car section, k>4 boxy),
+ * starting at the TOP center and running clockwise seen from +z (stern). */
+export function superRing(cx, cy, cz, rx, ry, k, n) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i / n) * Math.PI * 2;
+    const c = Math.cos(t), s = Math.sin(t);
+    // superellipse point via the parametric form with sign-preserving powers
+    const px = Math.sign(c) * Math.pow(Math.abs(c), 2 / k) * rx;
+    const py = Math.sign(s) * Math.pow(Math.abs(s), 2 / k) * ry;
+    pts.push([cx + px, cy + py, cz]);
+  }
+  return pts;
+}
+
+/* Loft an array of rings (each an array of equal-length [x,y,z] triples) into
+ * one indexed geometry; optionally cap the first/last ring with a flat fan.
+ * Rings must be wound consistently (all from superRing, or all mirrored the
+ * same way) or normals flip. */
+export function loftSections(rings, { capStart = false, capEnd = false } = {}) {
+  const n = rings[0].length;
+  let vi = 0;
+  const pos = [], idx = [], uvs = [];
+  for (let s = 0; s < rings.length; s++) {
+    for (let i = 0; i < n; i++) {
+      const p = rings[s][i];
+      pos.push(p[0], p[1], p[2]);
+      uvs.push(i / n, s / Math.max(1, rings.length - 1));
+    }
+  }
+  for (let s = 0; s < rings.length - 1; s++) {
+    const a = s * n, b = (s + 1) * n;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      // rings wind CCW seen from +z — this order puts wall normals OUTWARD
+      idx.push(a + i, b + j, b + i, a + i, a + j, b + j);
+    }
+  }
+  const capFan = (ringIdx, flip) => {
+    const base = vi;
+    const c = ringIdx * n;
+    // centroid of the ring as the fan apex
+    let cx = 0, cy = 0, cz = 0;
+    for (const p of rings[ringIdx]) { cx += p[0]; cy += p[1]; cz += p[2]; }
+    pos.push(cx / n, cy / n, cz / n);
+    uvs.push(0.5, flip ? 0 : 1);
+    vi++;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      if (flip) idx.push(base, c + j, c + i);
+      else idx.push(base, c + i, c + j);
+    }
+  };
+  vi = rings.length * n; // wall verts occupy 0..N-1; caps append after them
+  if (capStart) capFan(0, true);
+  if (capEnd) capFan(rings.length - 1, false);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/* Sweep circles of per-station `radii` along 3D `points` (a gentle arc — no
+ * twist handling, fine for necks/tails/tentacle-ish limbs). Smooth-shaded. */
+export function loftTube(points, radii, segs = 10) {
+  const rings = [];
+  for (let s = 0; s < points.length; s++) {
+    const p = points[s];
+    // tangent = direction to the next point (or previous at the end)
+    const q = points[Math.min(s + 1, points.length - 1)];
+    const r0 = points[Math.max(s - 1, 0)];
+    let dx = q[0] - r0[0], dy = q[1] - r0[1], dz = q[2] - r0[2];
+    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    // orthonormal side/up basis ⊥ tangent
+    let ux = 0, uy = 0, uz = 1; // seed reference
+    if (Math.abs(dy) > 0.9) { ux = 1; uy = 0; uz = 0; }
+    let ax = uy * dz - uz * dy, ay = uz * dx - ux * dz, az = ux * dy - uy * dx;
+    const al = Math.hypot(ax, ay, az) || 1; ax /= al; ay /= al; az /= al; // side
+    const bx = dy * az - dz * ay, by = dz * ax - dx * az, bz = dx * ay - dy * ax; // up
+    const ring = [];
+    for (let i = 0; i < segs; i++) {
+      const t = (i / segs) * Math.PI * 2;
+      const c = Math.cos(t) * radii[s], s2 = Math.sin(t) * radii[s];
+      ring.push([p[0] + ax * c + bx * s2, p[1] + ay * c + by * s2, p[2] + az * c + bz * s2]);
+    }
+    rings.push(ring);
+  }
+  return loftSections(rings, { capStart: true, capEnd: true });
 }
 
 /* name + live wpm label above a vehicle */
