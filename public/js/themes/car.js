@@ -4,9 +4,22 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { followPlayerSky, makeSunDisc, mergeInstancedGeometry, mergeStaticMeshes } from './shared.js';
+import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
+
+// shared wheel geometries + mount points — one InstancedMesh pair per car
+// (2 draw calls) instead of 8 separate meshes (SPEC §1.3 draw-call budget)
+const WHEEL_GEO = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
+WHEEL_GEO.rotateZ(Math.PI / 2);
+const RIM_GEO = new THREE.CylinderGeometry(0.21, 0.21, 0.36, 10);
+RIM_GEO.rotateZ(Math.PI / 2);
+const WHEEL_POS = [[-1.03, -1.35], [1.03, -1.35], [-1.03, 1.4], [1.03, 1.4]];
+const _XAXIS = new THREE.Vector3(1, 0, 0);
+const _wq = new THREE.Quaternion();
+const _wm4 = new THREE.Matrix4();
+const _wv = new THREE.Vector3();
+const _w1 = new THREE.Vector3(1, 1, 1);
 
 const expK = (k, dt) => 1 - Math.exp(-k * dt);
 
@@ -14,34 +27,35 @@ const expK = (k, dt) => 1 - Math.exp(-k * dt);
 const TOD = {
   day: {
     // sunny blue sky — coherent with the sharp mapped shadows (critic r6:
-    // overcast white sky + hard shadows contradict)
+    // overcast white sky + hard shadows contradict). sunDisc 1.0: the dome
+    // shader now shows a real ~2° sun at the sunRig azimuth
     skyTop: '#2f6ad0', skyMid: '#5a9be0', skyBot: '#bfdff2',
-    fogDensity: 0.0026, exposure: 1.0, sunRig: [34, 62, 18],
-    sunColor: '#fff2e0', sunIntensity: 2.6,
+    fogDensity: 0.0026, exposure: 1.0, sunRig: [34, 62, 18], sunDisc: 1.0,
+    sunColor: '#fff2e0', sunIntensity: 2.6, envSun: 1.0,
     hemiSky: '#cfe4ff', hemiGround: '#6a7a58', hemiIntensity: 0.55,
     ambient: 0.0, lamps: 0.0, cones: 0.0, beam: 0.0, stars: 0.0,
-    headlight: 0, tail: 0.15, moon: false, ground: '#5d9c4a', grass: '#5d9c4a',
+    headlight: 0, tail: 0.15, moon: false, ground: '#ffffff', grass: '#ffffff',
   },
   sunset: {
     skyTop: '#25246b', skyMid: '#b34a8a', skyBot: '#ff9a5a',
-    fogDensity: 0.0026, exposure: 0.85, sunRig: [70, 11, 6],
-    sunColor: '#ff9a55', sunIntensity: 1.7,
+    fogDensity: 0.0026, exposure: 0.85, sunRig: [70, 11, 6], sunDisc: 0.9, sunTint: '#ffc27a',
+    sunColor: '#ff9a55', sunIntensity: 1.7, envSun: 0.7,
     hemiSky: '#e0a8b8', hemiGround: '#5a4038', hemiIntensity: 0.35,
     ambient: 0.0, lamps: 0.55, cones: 0.0, beam: 0.08, stars: 0.25,
-    headlight: 350, tail: 0.8, moon: false, ground: '#5a4a30', grass: '#4a4530',
+    headlight: 350, tail: 0.8, moon: false, ground: '#c8b8a8', grass: '#c8b8a8',
   },
   night: {
     // near-black sky, silhouetted ground (critic r6: navy luma 32 vs refs 6–14).
     // r7: moon 0.5→0.32 — long near-black tree shadows contradicted a dim moon;
-    // grass forced cold/desaturated (was reading day-green)
+    // ground now multiplies the textured albedo (cold desaturated, r7)
     skyTop: '#03050c', skyMid: '#081120', skyBot: '#12233f',
-    fogDensity: 0.0030, exposure: 0.85, sunRig: [-26, 48, 34],
-    sunColor: '#8fb0ff', sunIntensity: 0.32,
+    fogDensity: 0.0030, exposure: 0.85, sunRig: [-26, 48, 34], sunDisc: 0,
+    sunColor: '#8fb0ff', sunIntensity: 0.32, envSun: 0.12,
     hemiSky: '#2a3f60', hemiGround: '#121a24', hemiIntensity: 0.55,
     ambient: 0.04, lamps: 1.0, cones: 0.0, beam: 0.1, stars: 1.0,
     // real low-beam ≈ 800–1500 cd; 60 cd is invisible after grazing-angle +
     // inverse-square + ACES (measured live: 60 cd → (0,1,6) on the road)
-    headlight: 800, tail: 1.2, moon: true, ground: '#0d1410', grass: '#232e26',
+    headlight: 800, tail: 1.2, moon: true, ground: '#3d4640', grass: '#3d4640',
   },
 };
 
@@ -65,35 +79,24 @@ function radialGlowTexture(color = '#ffd9a0') {
   }, 128, 128);
 }
 
-function skyTexture(tod) {
-  // NOTE: sphere UVs put canvas-bottom at the zenith — draw the gradient
-  // bottom-up so skyTop lands at the top of the sky. skyBot holds through the
-  // horizon (gradient position 0.5 = dome equator) so the fog band matches the
-  // horizon — no hard line where dome meets fog (critic r4).
-  return canvasTexture((ctx, w, h) => {
-    // EMPIRICAL mapping (r6): canvas TOP = zenith, position 0.5 = horizon
-    // (the old comment had it backwards — skyTop was painted at the nadir)
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, tod.skyTop);
-    g.addColorStop(0.28, tod.skyMid);
-    g.addColorStop(0.5, tod.skyBot); // fog band at the horizon
-    g.addColorStop(1, tod.skyBot);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-  }, 64, 512);
-}
-
 function buildCar(color, { player = false } = {}) {
   const g = new THREE.Group();
-  // §4 material table: paint 0.35/0.15, rubber 0.95/0.0 env 0.05, glass env 1.0.
-  // r7: paint rough 0.28 env 0.95 — the body read as matte plastic with no
-  // specular/env response (critic r7; still within the spec's ≈0.35/0.15)
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.28, metalness: 0.15, envMapIntensity: 0.95 });
+  // r11 paint: MeshPhysicalMaterial with a clearcoat lacquer layer (core three,
+  // no addons) — the r10 Standard paint still showed zero env response on the
+  // body panels (critic r10 #4). Physical paint = colored metallic base coat
+  // (metalness 0.55: F0 mixes the albedo into the reflection tint) + a clear
+  // dielectric coat (F0 0.04) that carries the sharp sky/sun glint exactly
+  // like real automotive lacquer.
+  const paint = new THREE.MeshPhysicalMaterial({
+    color, roughness: 0.38, metalness: 0.55,
+    clearcoat: 1.0, clearcoatRoughness: 0.12, envMapIntensity: 1.25,
+  });
   const dark = new THREE.MeshStandardMaterial({ color: '#16181d', roughness: 0.95, metalness: 0.0, envMapIntensity: 0.05 });
   const glass = new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.15, metalness: 0.6, transparent: true, opacity: 0.85, envMapIntensity: 1.3 });
 
   // body — wedge nose: the top front edge slopes down toward the lamps so the
-  // box reads as a car silhouette, not a raw brick (critic r6, §5.1)
+  // box reads as a car silhouette, not a raw brick (critic r6, §5.1). Static
+  // same-material parts (body/hood/trunk/roof) merge into ONE draw call.
   const bodyGeo = new THREE.BoxGeometry(1.9, 0.55, 4.1);
   {
     const pos = bodyGeo.attributes.position;
@@ -107,15 +110,12 @@ function buildCar(color, { player = false } = {}) {
   }
   const body = new THREE.Mesh(bodyGeo, paint);
   body.position.y = 0.55; body.castShadow = true;
-  g.add(body);
 
   const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.28, 1.3), paint);
   hood.position.set(0, 0.92, -1.2); hood.castShadow = true;
-  g.add(hood);
 
   const trunk = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.2, 0.8), paint);
   trunk.position.set(0, 0.92, 1.55); trunk.castShadow = true;
-  g.add(trunk);
 
   // beveled/tapered greenhouse — top verts pulled in and back (§5.1), plus a
   // paint roof cap so the glass doesn't read as a full-width glasshouse (r4)
@@ -132,46 +132,47 @@ function buildCar(color, { player = false } = {}) {
   }
   const cabin = new THREE.Mesh(cabinGeo, glass);
   cabin.position.set(0, 1.06, 0.25); cabin.castShadow = true;
-  g.add(cabin);
 
   const roof = new THREE.Mesh(new THREE.BoxGeometry(1.24, 0.07, 1.5), paint);
   roof.position.set(0, 1.33, 0.07); roof.castShadow = true;
-  g.add(roof);
+  g.add(new THREE.Mesh(mergeStaticMeshes([body, hood, trunk, roof]), paint), cabin);
 
   if (player) {
     const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.45), dark);
     spoiler.position.set(0, 1.05, 1.9);
-    g.add(spoiler);
     const finL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.4), dark);
-    finL.position.set(-0.7, 0.9, 1.9); g.add(finL);
-    const finR = finL.clone(); finR.position.x = 0.7; g.add(finR);
+    finL.position.set(-0.7, 0.9, 1.9);
+    const finR = finL.clone(); finR.position.x = 0.7;
+    g.add(new THREE.Mesh(mergeStaticMeshes([spoiler, finL, finR]), dark));
   }
 
-  const wheels = [];
-  const wgeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 14);
-  wgeo.rotateZ(Math.PI / 2);
   // chrome rim disc — face sits proud of the tire sidewall so the disc reads
   // from directly behind (critic r5)
-  const rimGeo = new THREE.CylinderGeometry(0.21, 0.21, 0.36, 10);
-  rimGeo.rotateZ(Math.PI / 2);
   const rimMat = new THREE.MeshStandardMaterial({ color: '#b8bcc4', roughness: 0.25, metalness: 0.9, envMapIntensity: 1.0 });
-  for (const [x, z] of [[-1.03, -1.35], [1.03, -1.35], [-1.03, 1.4], [1.03, 1.4]]) {
-    const w = new THREE.Mesh(wgeo, dark);
-    w.position.set(x, 0.38, z);
-    w.add(new THREE.Mesh(rimGeo, rimMat));
-    g.add(w);
-    wheels.push(w);
+  const wheels = new THREE.InstancedMesh(WHEEL_GEO, dark, 4);
+  const rims = new THREE.InstancedMesh(RIM_GEO, rimMat, 4);
+  wheels.frustumCulled = rims.frustumCulled = false;
+  {
+    const _q0 = new THREE.Quaternion();
+    for (let wi = 0; wi < 4; wi++) {
+      _wm4.compose(_wv.set(WHEEL_POS[wi][0], 0.38, WHEEL_POS[wi][1]), _q0, _w1);
+      wheels.setMatrixAt(wi, _wm4);
+      rims.setMatrixAt(wi, _wm4);
+    }
   }
+  g.add(wheels, rims);
 
   const hl = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#fff9c8' }));
-  hl.position.set(-0.55, 0.62, -2.06); g.add(hl);
-  const hr = hl.clone(); hr.position.x = 0.55; g.add(hr);
+  hl.position.set(-0.55, 0.62, -2.06);
+  const hr = hl.clone(); hr.position.x = 0.55;
+  g.add(new THREE.Mesh(mergeStaticMeshes([hl, hr]), hl.material));
 
   // taillights — physical emissive (SPEC §2: emissive only where physical, ≤2)
   const tailMat = new THREE.MeshStandardMaterial({ color: '#2a0508', emissive: '#ff2a33', emissiveIntensity: 0.15 });
   const tl = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.06), tailMat);
-  tl.position.set(-0.55, 0.66, 2.08); g.add(tl);
-  const tr = tl.clone(); tr.position.x = 0.55; g.add(tr);
+  tl.position.set(-0.55, 0.66, 2.08);
+  const tr = tl.clone(); tr.position.x = 0.55;
+  g.add(new THREE.Mesh(mergeStaticMeshes([tl, tr]), tailMat));
 
   // only the player carries a real light (PLAN §1.2: 5 lights → 1) — a SpotLight
   // so the beam actually pools on the road ahead instead of glowing in a bubble.
@@ -198,11 +199,10 @@ function buildCar(color, { player = false } = {}) {
   const beamL = new THREE.Mesh(beamGeo, coneMat);
   beamL.rotation.x = Math.PI / 2 - 0.14; // spread forward, tilted down at the road
   beamL.position.set(-0.55, 0.55, -2.06);
-  g.add(beamL);
   const beamR = new THREE.Mesh(beamGeo, coneMat);
   beamR.rotation.x = Math.PI / 2 - 0.07;
   beamR.position.set(0.55, 0.6, -2.06);
-  g.add(beamR);
+  g.add(new THREE.Mesh(mergeStaticMeshes([beamL, beamR]), coneMat));
 
   // low-beam pool — soft light lying ON the asphalt ahead of the lamps so the
   // beams read as road illumination, not floating bubbles (critic r6)
@@ -230,7 +230,7 @@ function buildCar(color, { player = false } = {}) {
   flameCore.position.set(0, 0.45, 2.2);
   g.add(flameCore);
 
-  return { group: g, wheels, coneMat, beamPoolMat, flame, flameCore, light, tailMat };
+  return { group: g, wheels, rims, coneMat, beamPoolMat, flame, flameCore, light, tailMat };
 }
 
 function makeLabel(name, colorCss) {
@@ -263,7 +263,28 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   let tod = TOD[timeOfDay] ?? TOD.day;
 
   /* ---------- environment ---------- */
-  const groundMat = new THREE.MeshStandardMaterial({ color: '#5d9c4a', roughness: 1, envMapIntensity: 0.2 });
+  // grass — seeded noise albedo (four-tone turf ramp: deep green → dry straw),
+  // normal + roughness maps for micro-relief. Kills the "one uniform emerald
+  // color" flatness (critic r10 #4) with zero asset files. r11: coarse MACRO
+  // patches (dry yellow-green meadows vs denser turf) — the r10 render still
+  // read as one repeating emerald tint with diagonal noise streaks; real
+  // grassland varies in 10–30m patches (see refs/real-world/real-horse.jpg)
+  const grassPBR = makeGroundPBR({
+    seed: 101, octaves: 5, firstLattice: 4, gain: 0.55, normalStrength: 2.2,
+    color: rampHex(['#44682f', '#5b8f42', '#6da04e', '#96a352']),
+    rough: (h) => 0.92 + h * 0.06,
+    macro: {
+      seed: 1017, firstLattice: 2, amount: 0.42,
+      color: rampHex(['#4c7231', '#8ba050', '#b3a75c']),
+    },
+  });
+  grassPBR.map.repeat.set(44, 190);   // ~16m tile → 5m patches down to 0.3m blades
+  grassPBR.normalMap.repeat.set(44, 190);
+  grassPBR.roughMap.repeat.set(44, 190);
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: '#ffffff', map: grassPBR.map, normalMap: grassPBR.normalMap,
+    roughnessMap: grassPBR.roughMap, roughness: 1, envMapIntensity: 0.2,
+  });
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 3000),
     groundMat
@@ -273,14 +294,58 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   ground.receiveShadow = true;
   group.add(ground);
 
+  // asphalt — aggregate speckle albedo + normal relief + roughness variation
+  // (0.78–0.95), replacing the single flat gray (r10 realism pass)
+  const asphaltPBR = makeGroundPBR({
+    seed: 55, octaves: 5, firstLattice: 4, gain: 0.55, normalStrength: 3.0,
+    color: rampHex(['#2f3237', '#3b3e44', '#44474d', '#4b4e54']),
+    rough: (h) => 0.78 + h * 0.17,
+  });
+  asphaltPBR.map.repeat.set(6, 520);  // ~2m tile → 3–6cm aggregate
+  asphaltPBR.normalMap.repeat.set(6, 520);
+  asphaltPBR.roughMap.repeat.set(6, 520);
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(13.4, TRACK_LENGTH + 160),
-    new THREE.MeshStandardMaterial({ color: '#3b3e46', roughness: 0.9, envMapIntensity: 0.25 })
+    new THREE.MeshStandardMaterial({
+      color: '#ffffff', map: asphaltPBR.map, normalMap: asphaltPBR.normalMap,
+      roughnessMap: asphaltPBR.roughMap, roughness: 1, envMapIntensity: 0.25,
+    })
   );
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0.02, -TRACK_LENGTH / 2);
   road.receiveShadow = true;
   group.add(road);
+
+  // wheel-track wear — the darker compressed lanes every driven road photo
+  // shows along the wheel lines (real asphalt never wears uniformly). One soft
+  // alpha texture repeated along the track, 4 strips merged into ONE mesh (+1
+  // draw call — SPEC §1.3 budget holds)
+  const wearTex = canvasTexture((ctx, w, h) => {
+    const g2 = ctx.createLinearGradient(0, 0, w, 0);
+    g2.addColorStop(0, 'rgba(10,12,14,0)');
+    g2.addColorStop(0.5, 'rgba(10,12,14,0.55)');
+    g2.addColorStop(1, 'rgba(10,12,14,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(0, 0, w, h);
+    // faint lengthwise streaks inside the band (tire tread smear)
+    for (let i = 0; i < 26; i++) {
+      ctx.fillStyle = `rgba(8,10,12,${0.05 + Math.random() * 0.08})`;
+      ctx.fillRect(Math.random() * w, 0, 1 + Math.random() * 2, h);
+    }
+  }, 64, 256);
+  wearTex.wrapS = wearTex.wrapT = THREE.RepeatWrapping;
+  wearTex.repeat.set(1, 90);
+  const wearMat = new THREE.MeshBasicMaterial({ map: wearTex, transparent: true, opacity: 0.34, depthWrite: false });
+  const wearParts = [];
+  // strip positions = the wheel-track clusters of the five LANES (laneX±1.03
+  // collapses to three pairs: ±1.1, ±3.3, ±5.43)
+  for (const lx of [-5.43, -3.3, -1.1, 1.1, 3.3, 5.43]) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.85, TRACK_LENGTH + 120), wearMat);
+    strip.rotation.x = -Math.PI / 2;
+    strip.position.set(lx, 0.035, -TRACK_LENGTH / 2);
+    wearParts.push(strip);
+  }
+  group.add(new THREE.Mesh(mergeStaticMeshes(wearParts), wearMat));
 
   // dashed lane lines — Standard so night light falls off across them
   // (critic r5: Basic stayed readable at any distance)
@@ -347,7 +412,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   trunks.dispose(); crowns.dispose(); trunkGeo.dispose(); crownGeo.dispose();
 
   const rocks = new THREE.InstancedMesh(
-    new THREE.DodecahedronGeometry(0.7),
+    jitterRock(new THREE.DodecahedronGeometry(0.7), { amp: 0.3, seed: 55, freq: 3.5 }),
     new THREE.MeshStandardMaterial({ color: '#8d9298', roughness: 1 }),
     40
   );
@@ -406,8 +471,11 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   ];
 
   // billboards with playful copy (unlit → glow like neon at night) — dimmed
-  // per TOD in setTimeOfDay, so the materials are collected here
+  // per TOD in setTimeOfDay, so the materials are collected here. Posts share
+  // one material and merge into ONE mesh (6 → 1 draws, §1.3 budget).
   const boardMats = [];
+  const boardPostParts = [];
+  const boardPostMat = new THREE.MeshStandardMaterial({ color: '#4a4f58' });
   const slogans = ['TYPE FASTER!', 'wpm > everything', 'TypeRacer 3D', '🚤 try River Rapids', '🐎 try Wild West', '🚀 try Orbit Dash', 'no typos allowed'];
   for (let i = 0; i < 6; i++) {
     const side = i % 2 ? 1 : -1;
@@ -421,14 +489,18 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     const boardMat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, transparent: true });
     boardMats.push(boardMat);
     const board = new THREE.Mesh(new THREE.PlaneGeometry(9, 3.1), boardMat);
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4, 0.35), new THREE.MeshStandardMaterial({ color: '#4a4f58' }));
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4, 0.35), boardPostMat);
     post.position.set(side * 11, 2, z);
     board.position.set(side * 11, 5.4, z);
     board.rotation.y = side * -Math.PI / 5.2;
     post.castShadow = true;
     board.castShadow = true;
-    group.add(post, board);
+    group.add(board);
+    boardPostParts.push(post);
   }
+  const boardPosts = new THREE.Mesh(mergeStaticMeshes(boardPostParts), boardPostMat);
+  boardPosts.castShadow = true;
+  group.add(boardPosts);
 
   /* ---------- street lamps + light pools (night charm) ---------- */
   // merged into 3 meshes total: poles+arms, heads, pools (64 → 3 draw calls)
@@ -460,10 +532,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(lampPoles, lampHeads, lampPools);
 
   /* ---------- sky dome + stars + moon ---------- */
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(620, 24, 16),
-    new THREE.MeshBasicMaterial({ map: skyTexture(tod), side: THREE.BackSide, fog: false })
-  );
+  // shader dome: eased atmospheric gradient + real ~2° sun disc (shared.js);
+  // replaces the canvas-gradient texture + separate sun sprite (r10)
+  const sky = createSkyDome(620);
   group.add(sky);
 
   const starGeo = new THREE.BufferGeometry();
@@ -495,11 +566,6 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
 
   // these must follow the player, or the camera exits the skybox mid-track
   const celestial = [sky, stars, moon, moonGlow];
-
-  // low sunset sun — the visible source for the warm light (SPEC §2)
-  const sunDisc = makeSunDisc('#ffc27a');
-  celestial.push(sunDisc);
-  group.add(sunDisc); // was never in the scene graph — the disc could not render (r4)
 
   /* ---------- finish gate ---------- */
   const gateZ = -TRACK_LENGTH;
@@ -542,6 +608,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       isPlayer,
       wobble: rng() * 10,
       visZ: 0,
+      wheelSpin: 0,
       updateLabel(wpmText, sub) { label.draw(wpmText, sub); },
     });
   });
@@ -549,15 +616,16 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   /* ---------- time of day ---------- */
   function setTimeOfDay(name) {
     tod = TOD[name] ?? TOD.day;
-    sky.material.map = skyTexture(tod);
-    sky.material.map.needsUpdate = true;
+    setSkyDome(sky, tod); // gradient + real sun disc, written once per TOD
     // fog fades toward the sky's horizon band, not a generic gray
     // (GRAPHICS_PLAN §1.4); FogExp2 density replaces the old linear near/far
     world.setFog(tod.skyBot, tod.fogDensity);
     world.scene.background.set(tod.skyBot);
     world.setExposure(tod.exposure);
-    world.setEnvironment(tod.skyTop, tod.skyMid, tod.skyBot, tod.ground, { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }); // grass bounce by day, near-black at night (r6); sun glint on paint (r7)
-    groundMat.color.set(tod.grass); // cold desaturated grass at night (critic r7)
+    // envSun scales the HDR blob: 1.0 by day (paint glint, r10 #4), ~0.12 at
+    // night so the moon glint stays dim (r10 #5)
+    world.setEnvironment(tod.skyTop, tod.skyMid, tod.skyBot, tod.ground, { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }, tod.envSun);
+    groundMat.color.set(tod.grass); // multiplies the grass albedo map (night: cold dim)
     world.sunRig.set(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
     world.sun.color.set(tod.sunColor);
     world.sun.intensity = tod.sunIntensity;
@@ -565,11 +633,6 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.hemi.groundColor.set(tod.hemiGround);
     world.hemi.intensity = tod.hemiIntensity;
     world.ambient.intensity = tod.ambient;
-    // visible sun disc rides the sunRig direction (anchor for the warm light)
-    const rigLen = Math.hypot(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
-    sunDisc.position.set(tod.sunRig[0] / rigLen * 550, tod.sunRig[1] / rigLen * 550, tod.sunRig[2] / rigLen * 550);
-    sunDisc.userData.skyZ0 = sunDisc.position.z; // re-stamp backdrop offset (was captured before placement)
-    sunDisc.material.opacity = name === 'sunset' ? 0.55 : 0;
     boardMats.forEach((m) => (m.opacity = name === 'night' ? 0.55 : name === 'sunset' ? 0.8 : 1.0));
     starMat.opacity = tod.stars;
     moonGlow.material.opacity = tod.moon ? 0.5 : 0;
@@ -622,8 +685,18 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
         v.group.rotation.z += (Math.random() - 0.5) * 0.12;
         rs.errorT -= dt;
       }
+      // wheels spin via the two InstancedMeshes (tires + rims) — one shared
+      // angle, matrices composed with reused temporaries (no per-frame alloc)
       const wheelK = (s01 * 14 + 2) * dt;
-      v.wheels.forEach((w) => { w.rotation.x -= wheelK; });
+      v.wheelSpin -= wheelK;
+      _wq.setFromAxisAngle(_XAXIS, v.wheelSpin);
+      for (let wi = 0; wi < 4; wi++) {
+        _wm4.compose(_wv.set(WHEEL_POS[wi][0], 0.38, WHEEL_POS[wi][1]), _wq, _w1);
+        v.wheels.setMatrixAt(wi, _wm4);
+        v.rims.setMatrixAt(wi, _wm4);
+      }
+      v.wheels.instanceMatrix.needsUpdate = true;
+      v.rims.instanceMatrix.needsUpdate = true;
 
       // combo flames (player)
       const heat = rs.comboHeat ?? 0;

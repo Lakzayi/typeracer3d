@@ -49,8 +49,10 @@ export class World {
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 1200);
     this.camera.position.set(0, 5, 12);
 
-    // rearview mirror camera
-    this.rearCam = new THREE.PerspectiveCamera(56, 4, 0.1, 500);
+    // rearview mirror camera — far plane must reach the 620-radius sky dome
+    // (500 cut it off, so the mirror showed a flat background band instead of
+    // the same sky the main camera sees; critic r10 brief #6)
+    this.rearCam = new THREE.PerspectiveCamera(56, 4, 0.1, 700);
     this.mirrorEnabled = true;
 
     const hemi = new THREE.HemisphereLight('#cfe8ff', '#5a7050', 0.9);
@@ -145,7 +147,7 @@ export class World {
    * surfaces get a real specular glint that moves with the sun — a smooth
    * gradient env alone reflects back ≈ the base color and water reads as
    * matte paint (critic r7). */
-  setEnvironment(skyTop, skyMid, skyBot, groundColor, sunDir) {
+  setEnvironment(skyTop, skyMid, skyBot, groundColor, sunDir, sunStrength = 1) {
     if (!this._envScene) {
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 256;
@@ -166,11 +168,11 @@ export class World {
       this._envScene.add(dome, ground);
       this._envGroundMat = ground.material;
       // HDR hot spot — overbright color (RGB > 1) survives PMREM capture, so
-      // low-roughness materials show a true sun highlight (SPEC §2)
-      this._envSun = new THREE.Mesh(
-        new THREE.SphereGeometry(4.5, 12, 8),
-        new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 8.2, 7.0) })
-      );
+      // low-roughness materials show a true sun highlight (SPEC §2). Smaller
+      // sphere (was 4.5): a tight glint reads as the sun on paint/water; a
+      // wide one smeared a cream highlight over whole panels (r7 note).
+      this._envSunMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 8.2, 7.0) });
+      this._envSun = new THREE.Mesh(new THREE.SphereGeometry(3.2, 12, 8), this._envSunMat);
       this._envSun.visible = false;
       this._envScene.add(this._envSun);
     }
@@ -184,7 +186,11 @@ export class World {
     if (sunDir) {
       const len = Math.hypot(sunDir.x, sunDir.y, sunDir.z) || 1;
       this._envSun.position.set(sunDir.x / len * 42, Math.max(6, sunDir.y / len * 42), sunDir.z / len * 42);
-      this._envSun.visible = true;
+      // sunStrength scales the HDR blob: 1.0 by day, ~0.12 at night so the
+      // "moon glint" on paint/fins stays physically dim (critic r10 brief #5)
+      const k = Math.max(0, sunStrength);
+      this._envSunMat.color.setRGB(9 * k, 8.2 * k, 7.0 * k);
+      this._envSun.visible = k > 0.001;
     } else {
       this._envSun.visible = false;
     }
@@ -236,6 +242,7 @@ export class World {
 
   /* per-frame */
   update(dt, racersState) {
+    this._lastDt = dt; // for the 1Hz draw-call probe (see render)
     const focus = this.theme?.vehicles?.[this.focusIdx];
     if (!focus) return;
     const carPos = focus.group.position;
@@ -330,6 +337,13 @@ export class World {
   render() {
     const r = this.renderer;
     r.render(this.scene, this.camera);
+    // draw-call budget probe (SPEC §1.3: "measured, not promised") — samples
+    // 1×/s, only when the QA autoshot harness drives the page. info resets at
+    // each render() call, so the main-pass counts are captured here and the
+    // mirror pass's counts are added after its render below.
+    if (this._probeDC === undefined) this._probeDC = location.search.includes('autoshot');
+    const _mainCalls = this._probeDC ? r.info.render.calls : 0;
+    const _mainTris = this._probeDC ? r.info.render.triangles : 0;
 
     // rearview mirror pass
     if (this.mirrorEnabled && this.theme?.vehicles?.[this.focusIdx]) {
@@ -347,6 +361,13 @@ export class World {
       r.setScissorTest(false);
       r.setViewport(0, 0, w, h);
       r.autoClear = true;
+      if (this._probeDC) {
+        this._probeT = (this._probeT || 0) + (this._lastDt || 0);
+        if (this._probeT > 1) {
+          this._probeT = 0;
+          console.log('DRAW_CALLS', _mainCalls + r.info.render.calls, 'TRIS', _mainTris + r.info.render.triangles);
+        }
+      }
     }
   }
 }

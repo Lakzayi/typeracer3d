@@ -3,45 +3,51 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, makeSunDisc, mergeStaticMeshes } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
 const TOD = {
   day: {
-    // fog pulled back so it only fades the far distance (critic r7: uniform
-    // white curtain) + a more tonal horizon band. waterEnv 1.15: at grazing
-    // angles the canal is a near-perfect mirror — env 2.1 reflected the bright
-    // sky back and washed the whole scene (measured in the r7 day shot)
+    // r11: sun moved INTO the frame. The chase cam looks 6.4° DOWN, so the
+    // visible sky tops out near +24° elevation — a 29° sun (first attempt)
+    // left the disc just off-frame. ~16° puts the disc in open sky below the
+    // HUD bar; with the sun behind, no disc was ever visible in the main sky
+    // while the mirror pass saw one — the r10 critic's #6 "consistency"
+    // complaint; a forward sun also lights the canyon the way the photo shows.
     skyTop: '#3f7fd9', skyMid: '#7fb4e4', skyBot: '#b9d6ee',
-    fogDensity: 0.0022, exposure: 1.0, sunRig: [30, 58, 22],
+    fogDensity: 0.0022, exposure: 1.0, sunRig: [-26, 16, -52], sunDisc: 1.0, envSun: 1.0,
     sunColor: '#fff2e0', sunIntensity: 2.5,
     hemiSky: '#cfe8ff', hemiGround: '#3c5a52', hemiIntensity: 0.5,
-    ambient: 0.0, lanterns: 0.0, stars: 0.0, water: '#14586e', waterEnv: 1.15, navLights: 0.35,
+    // r11 water tint: PALE slate + metalness 0.9 — the specular F0 of a metal
+    // is the albedo itself, so a dark blue albedo painted every grazing-angle
+    // mirror dark blue (the r10 render's saturated far river). A pale tint
+    // keeps the near-field slate and lets the far river mirror the SKY color.
+    ambient: 0.0, lanterns: 0.0, stars: 0.0, water: '#8fb3c4', waterEnv: 1.35, navLights: 0.35,
     headlight: 0,
   },
   sunset: {
-    // ORANGE sky family — the water reflects the sky, so a magenta skyBand
-    // turned the water purple (critic r6): dusk blue top, orange mid/horizon.
-    // r7: sun/hemi less saturated so shadowed sand/rocks stay cool instead of
-    // everything reading as one orange filter
-    skyTop: '#3a2a4a', skyMid: '#e8874a', skyBot: '#ffb26a', skyLow: '#ffc98a',
-    // deeper terracotta haze, and thinner than r8: the bright horizon band as
-    // fog painted every midground object the same pastel orange (r9 critic)
-    fog: '#e09a66', fogDensity: 0.0021, exposure: 0.85,
+    // r11 DE-MARS pass: the r10 render read as one saturated orange filter —
+    // sky mid #e8874a + fog #e09a66 + waterEnv 1.25 mirrored the orange env
+    // over the WHOLE river (canyon, water, banks all went red-brown). A real
+    // dusk river photo: slate-blue sky above, warm band ONLY at the horizon,
+    // dark water, warm land in shade. Saturation down everywhere; the golden
+    // path lives in the glitter stripe + env glint near the sun.
+    skyTop: '#232a44', skyMid: '#c97a4e', skyBot: '#f2b878', skyLow: '#ffd9a0',
+    fog: '#c08a62', fogDensity: 0.0017, exposure: 0.85,
     // sun just over the canyon rim: elevation ~8° (critic r6: sun sat too high)
-    sunRig: [-28, 8, -52],
-    sunColor: '#ffb87c', sunIntensity: 1.6,
-    hemiSky: '#c9a8b8', hemiGround: '#33302e', hemiIntensity: 0.36,
-    ambient: 0.0, lanterns: 0.6, stars: 0.25, water: '#4a4347', waterEnv: 2.0, navLights: 0.8,
+    sunRig: [-28, 8, -52], sunDisc: 0.9, sunTint: '#ffcf9a', envSun: 0.7,
+    sunColor: '#ffcf9e', sunIntensity: 1.5,
+    hemiSky: '#9a8a96', hemiGround: '#33302e', hemiIntensity: 0.34,
+    ambient: 0.0, lanterns: 0.6, stars: 0.25, water: '#6d8598', waterEnv: 0.8, navLights: 0.8,
     headlight: 14,
   },
   night: {
     skyTop: '#04060f', skyMid: '#0b1530', skyBot: '#1b3a66',
-    fogDensity: 0.0030, exposure: 0.85, sunRig: [-22, 44, 30],
+    fogDensity: 0.0030, exposure: 0.85, sunRig: [-22, 44, 30], sunDisc: 0, envSun: 0.12,
     sunColor: '#8fb0ff', sunIntensity: 0.65,
     hemiSky: '#35507c', hemiGround: '#152028', hemiIntensity: 0.9,
-    ambient: 0.05, lanterns: 1.0, stars: 1.0, water: '#123049', waterEnv: 1.4, navLights: 1.0,
+    ambient: 0.05, lanterns: 1.0, stars: 1.0, water: '#3d5a70', waterEnv: 1.3, navLights: 1.0,
     headlight: 160,
   },
 };
@@ -53,7 +59,8 @@ function buildBoat(color, { player = false } = {}) {
   const darkMat = new THREE.MeshStandardMaterial({ color: '#20242c', roughness: 0.8 });
 
   // hull: box tapered toward the stern + chined at the waterline (PLAN §5.2),
-  // then a flattened cone prow (-Z)
+  // then a flattened cone prow (-Z). Static same-material parts are MERGED into
+  // one mesh each — 5 boats × ~19 draws blew the §1.3 draw-call budget.
   const hullGeo = new THREE.BoxGeometry(1.7, 0.5, 3.4);
   {
     const pos = hullGeo.attributes.position;
@@ -67,31 +74,31 @@ function buildBoat(color, { player = false } = {}) {
   }
   const hull = new THREE.Mesh(hullGeo, hullMat);
   hull.position.y = 0.42; hull.castShadow = true;
-  g.add(hull);
   const bow = new THREE.Mesh(new THREE.ConeGeometry(0.85, 1.5, 4), hullMat);
   bow.rotation.x = -Math.PI / 2;
   bow.rotation.z = Math.PI / 4;
   bow.position.set(0, 0.42, -2.45);
   bow.scale.y = 0.3; // flatten cone into a long prow
   bow.castShadow = true;
-  g.add(bow);
-  // fenders: dark rub-rail beads along the waterline contact
+  const hullMesh = new THREE.Mesh(mergeStaticMeshes([hull, bow]), hullMat);
+  g.add(hullMesh);
+  // fenders: dark rub-rail beads along the waterline contact + outboard motor
   const fenderGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.9, 8);
   const fenderL = new THREE.Mesh(fenderGeo, darkMat);
   fenderL.rotation.z = Math.PI / 2;
   fenderL.position.set(-0.88, 0.3, 0);
   const fenderR = fenderL.clone(); fenderR.position.x = 0.88;
-  g.add(fenderL, fenderR);
+  const motor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.3), darkMat);
+  motor.position.set(0, 0.62, 1.85);
+  g.add(new THREE.Mesh(mergeStaticMeshes([fenderL, fenderR, motor]), darkMat));
   const deck = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.12, 2.4), deckMat);
   deck.position.set(0, 0.72, 0.2);
-  g.add(deck);
-
-  // small cabin behind the driver — hull-scale superstructure (§5.2)
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.4, 0.8), deckMat);
   cabin.position.set(0, 0.95, 0.9); cabin.castShadow = true;
+  g.add(new THREE.Mesh(mergeStaticMeshes([deck, cabin]), deckMat));
   const roof = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.06, 0.86), hullMat);
   roof.position.set(0, 1.17, 0.9);
-  g.add(cabin, roof);
+  g.add(roof);
 
   // windshield + tiny driver
   const shield = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.34, 0.08), new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.1, transparent: true, opacity: 0.85 }));
@@ -107,11 +114,6 @@ function buildBoat(color, { player = false } = {}) {
   driver.add(torso, head, helmet);
   driver.position.set(0, 0.78, 0.35);
   g.add(driver);
-
-  // outboard motor
-  const motor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.3), darkMat);
-  motor.position.set(0, 0.62, 1.85);
-  g.add(motor);
 
   // navigation lights (port red / starboard green) — shine at dusk/night
   const navMat = (c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.3 });
@@ -219,9 +221,27 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   let tod = TOD[timeOfDay] ?? TOD.day;
 
   /* ---------- banks & canyon ---------- */
+  // sandy banks — seeded fbm albedo + normal relief (r10 realism pass; was one
+  // flat #a68a5e plane). r11: macro patches (pale dry vs darker damp sand) so
+  // the banks stop reading as one uniform tint
+  const bankPBR = makeGroundPBR({
+    seed: 61, octaves: 5, firstLattice: 4, gain: 0.55, normalStrength: 2.6,
+    color: rampHex(['#8a7148', '#a68a5e', '#b59a6c', '#93794f']),
+    rough: (h) => 0.9 + h * 0.08,
+    macro: {
+      seed: 613, firstLattice: 2, amount: 0.3,
+      color: rampHex(['#7a6440', '#b09568', '#c2a878']),
+    },
+  });
+  bankPBR.map.repeat.set(85, 360);
+  bankPBR.normalMap.repeat.set(85, 360);
+  bankPBR.roughMap.repeat.set(85, 360);
   const banks = new THREE.Mesh(
     new THREE.PlaneGeometry(700, 3000),
-    new THREE.MeshStandardMaterial({ color: '#a68a5e', roughness: 1 })
+    new THREE.MeshStandardMaterial({
+      color: '#ffffff', map: bankPBR.map, normalMap: bankPBR.normalMap,
+      roughnessMap: bankPBR.roughMap, roughness: 1, envMapIntensity: 0.2,
+    })
   );
   banks.rotation.x = -Math.PI / 2;
   banks.position.set(0, 0.35, -TRACK_LENGTH / 2);
@@ -229,13 +249,14 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(banks);
 
   // the river — finer, subtler ripple ellipses: the old big dark blobs read
-  // as paint stains (critic r5)
+  // as paint stains (critic r5); r11: contrast halved again — with the
+  // Fresnel env mirror carrying the realism, the stain layer must whisper
   const waterTex = canvasTexture((ctx, w, h) => {
     // opaque white base so the map multiplies to the water color instead of black
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 110; i++) {
-      ctx.fillStyle = i % 3 ? 'rgba(255,255,255,0.13)' : 'rgba(18,58,68,0.05)';
+      ctx.fillStyle = i % 3 ? 'rgba(255,255,255,0.07)' : 'rgba(18,58,68,0.03)';
       ctx.beginPath();
       ctx.ellipse(Math.random() * w, Math.random() * h, 5 + Math.random() * 14, 0.8 + Math.random() * 1.6, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -243,13 +264,26 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   }, 256, 256);
   waterTex.wrapS = waterTex.wrapT = THREE.RepeatWrapping;
   waterTex.repeat.set(3, 60);
-  // §4 water: low roughness + real metalness so the sky env actually mirrors
-  // (critic r4/r5: flat turquoise with painted stains). r7: roughness 0.07 so
-  // the env sun-blob gives a visible glint (env alone = gradient = invisible)
-  // r9: metalness 0.5 — from the chase cam the water is seen from ABOVE, where
-  // a dielectric's Fresnel reflectance collapses to ~4% and the env never shows
-  // no matter how low the roughness; half-metal keeps the mirror at every angle
-  const waterMat = new THREE.MeshStandardMaterial({ color: tod.water, roughness: 0.07, metalness: 0.5, map: waterTex, envMapIntensity: tod.waterEnv });
+  // r11 water — Fresnel env rework (critic r10 #1 "too matte"):
+  // • applyFresnelEnv (shared.js): specular IBL scaled by (1−N·V)^3.2 — the
+  //   far river goes full sky-mirror while the near field keeps the dense
+  //   water color; a uniform envMapIntensity cannot do both
+  // • calmer baked ripples (strength 6.0→3.2, normalScale 0.6): the r10
+  //   speckle read as noisy plastic; real river chop is subtle at this distance
+  // • roughnessMap 0.05–0.15: tighter gloss band so glints stay crisp
+  const waterPBR = makeGroundPBR({
+    seed: 9, octaves: 5, firstLattice: 3, gain: 0.6, normalStrength: 3.2,
+    color: () => [255, 255, 255], // albedo unused — metal tint comes from color
+    rough: (h) => 0.05 + h * 0.1,
+  });
+  waterPBR.normalMap.repeat.set(7, 420);  // ~2.1m × 2.6m ripple tiles
+  waterPBR.roughMap.repeat.set(7, 420);
+  const waterMat = applyFresnelEnv(new THREE.MeshStandardMaterial({
+    color: tod.water, roughness: 1, metalness: 0.9,
+    map: waterTex, normalMap: waterPBR.normalMap, roughnessMap: waterPBR.roughMap,
+    envMapIntensity: tod.waterEnv,
+  }), { base: 0.32, rim: 0.68, exp: 4.0 });
+  waterMat.normalScale.set(0.6, 0.6);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(14.6, TRACK_LENGTH + 200), waterMat);
   water.receiveShadow = true;
   water.rotation.x = -Math.PI / 2;
@@ -280,15 +314,19 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const shores = new THREE.Mesh(mergeStaticMeshes([shoreL, shoreR]), shoreMat);
   group.add(shores);
 
-  // canyon cliffs — 90 rocks merged into ONE mesh (90 → 1 draw calls)
-  const cliffMat = new THREE.MeshStandardMaterial({ color: '#8a6f56', roughness: 1, flatShading: true });
+  // canyon cliffs — 90 rocks merged into ONE mesh (90 → 1 draw calls).
+  // r11: base dropped toward gray-brown — under the orange sunset sun the old
+  // #8a6f56 went full mars-red (part of the r10 "everything orange" failure).
+  // Vertices jittered so the clean dodecahedra read as weathered rock.
+  const cliffMat = new THREE.MeshStandardMaterial({ color: '#77624e', roughness: 1, flatShading: true });
   const cliffMeshes = [];
   for (let i = 0; i < 90; i++) {
     const side = i % 2 ? 1 : -1;
     const x = side * (13 + rng() * 22);
     const z = 16 - rng() * (TRACK_LENGTH + 40);
     const s = 2.5 + rng() * 6;
-    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), cliffMat);
+    const rockGeo = jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.22, seed: 40 + i });
+    const rock = new THREE.Mesh(rockGeo, cliffMat);
     rock.position.set(x, s * 0.55, z);
     rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
     cliffMeshes.push(rock);
@@ -312,32 +350,43 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const reeds = new THREE.Mesh(mergeStaticMeshes(reedMeshes), reedMat);
   group.add(reeds);
 
-  // buoys as lane dividers (bobbing red/white spheres)
-  const buoyGroups = [];
-  const buoyRed = new THREE.MeshStandardMaterial({ color: '#e04848', roughness: 0.6 });
-  const buoyWhite = new THREE.MeshStandardMaterial({ color: '#f2f2f2', roughness: 0.6 });
-  for (const lx of [-3.3, -1.1, 1.1, 3.3]) {
-    for (let z = 10; z > -TRACK_LENGTH; z -= 24) {
-      const b = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6), (Math.round(z / 24) % 2) ? buoyRed : buoyWhite);
-      body.position.y = 0.22;
-      body.castShadow = true;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 4), buoyWhite);
-      pole.position.y = 0.6;
-      b.add(body, pole);
-      b.position.set(lx, 0.42, z);
-      b.userData.phase = rng() * 10;
-      group.add(b);
-      buoyGroups.push(b);
+  // buoys as lane dividers — TWO InstancedMeshes (bodies with per-instance
+  // red/white color + poles). 152 buoys were 304 draw calls as Groups (3.6× the
+  // §1.3 budget); instanced they are 2. Bobbing is re-composed per frame with
+  // reused temporaries — no allocations (SPEC §1.3).
+  const buoyGeo = new THREE.SphereGeometry(0.26, 8, 6);
+  const buoyPoleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.5, 4);
+  const buoyMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.6 });
+  const buoyPoleMat = new THREE.MeshStandardMaterial({ color: '#f2f2f2', roughness: 0.6 });
+  const BUOY_N = 4 * Math.ceil((10 + TRACK_LENGTH) / 24);
+  const buoyBodies = new THREE.InstancedMesh(buoyGeo, buoyMat, BUOY_N);
+  const buoyPoles = new THREE.InstancedMesh(buoyPoleGeo, buoyPoleMat, BUOY_N);
+  buoyBodies.frustumCulled = buoyPoles.frustumCulled = false; // spread over the whole track
+  const buoyX = new Float32Array(BUOY_N), buoyZ = new Float32Array(BUOY_N);
+  const buoyPhase = new Float32Array(BUOY_N);
+  {
+    const _bc = new THREE.Color();
+    let bi = 0;
+    for (const lx of [-3.3, -1.1, 1.1, 3.3]) {
+      for (let z = 10; z > -TRACK_LENGTH; z -= 24) {
+        buoyX[bi] = lx; buoyZ[bi] = z;
+        buoyPhase[bi] = rng() * 10;
+        _bc.set((Math.round(z / 24) % 2) ? '#e04848' : '#f2f2f2');
+        buoyBodies.setColorAt(bi, _bc);
+        bi++;
+      }
     }
+    buoyBodies.instanceColor.needsUpdate = true;
   }
+  group.add(buoyBodies, buoyPoles);
 
-  // docks with lanterns (lantern light pools at night)
+  // docks with lanterns — static parts merged into 4 meshes total (was 40)
   const lampGlowTex = radialGlowTexture('#ffcf8a');
   const dockMat = new THREE.MeshStandardMaterial({ color: '#8a6a45', roughness: 1 });
   const poleMat = new THREE.MeshStandardMaterial({ color: '#5d4630', roughness: 1 });
   const lampHeadMat = new THREE.MeshBasicMaterial({ color: '#8b9099' });
-  const pools = [];
+  const poolMat = new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+  const dockParts = [], postParts = [], headParts = [], poolParts = [];
   for (let i = 0; i < 10; i++) {
     const side = i % 2 ? 1 : -1;
     const z = -40 - i * (TRACK_LENGTH / 10) - rng() * 20;
@@ -349,37 +398,21 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     post.castShadow = true;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 6), lampHeadMat);
     head.position.set(side * 7.2, 3.9, z);
-    const pool = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 14),
-      new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
-    );
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(10, 14), poolMat);
     pool.rotation.x = -Math.PI / 2;
     pool.position.set(side * 6.6, 0.46, z);
-    group.add(dock, post, head, pool);
-    pools.push(pool);
+    dockParts.push(dock); postParts.push(post); headParts.push(head); poolParts.push(pool);
   }
+  const docks = new THREE.Mesh(mergeStaticMeshes(dockParts), dockMat); docks.castShadow = true;
+  const dockPosts = new THREE.Mesh(mergeStaticMeshes(postParts), poleMat); dockPosts.castShadow = true;
+  const dockHeads = new THREE.Mesh(mergeStaticMeshes(headParts), lampHeadMat);
+  const dockPools = new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat);
+  group.add(docks, dockPosts, dockHeads, dockPools);
 
   /* ---------- sky + stars + moon ---------- */
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(620, 24, 16),
-    new THREE.MeshBasicMaterial({ map: (() => {
-      // canvas-bottom lands at zenith → draw gradient bottom-up; skyBot holds
-      // through the horizon (position 0.5) so the fog band matches (critic r4)
-      const c = document.createElement('canvas'); c.width = 64; c.height = 512;
-      const ctx = c.getContext('2d');
-      // EMPIRICAL mapping (r6): canvas TOP = zenith, position 0.5 = horizon
-      const gr = ctx.createLinearGradient(0, 0, 0, 512);
-      gr.addColorStop(0, tod.skyTop);
-      gr.addColorStop(0.28, tod.skyMid);
-      gr.addColorStop(0.5, tod.skyBot);
-      if (tod.skyLow) gr.addColorStop(0.47, tod.skyLow); // warm band just over the horizon
-      gr.addColorStop(1, tod.skyBot); // blue in frame (r6)
-      ctx.fillStyle = gr; ctx.fillRect(0, 0, 64, 512);
-      const tex = new THREE.CanvasTexture(c);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      return tex;
-    })(), side: THREE.BackSide, fog: false })
-  );
+  // shader dome (shared.js) — skyLow carries the warm band just over the
+  // horizon at sunset
+  const sky = createSkyDome(620);
   group.add(sky);
 
   const starGeo = new THREE.BufferGeometry();
@@ -408,11 +441,6 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
 
   // these must follow the player, or the camera exits the skybox mid-track
   const celestial = [sky, stars, moon, moonGlow];
-
-  // low sunset sun — visible source for the warm light (SPEC §2)
-  const sunDisc = makeSunDisc('#ffc27a');
-  celestial.push(sunDisc);
-  group.add(sunDisc); // was never in the scene graph — the disc could not render (r4)
 
   // golden sun path on the water at sunset — the classic reflection stripe,
   // laid toward the sun azimuth (critic r2: water needs a warm light path).
@@ -485,16 +513,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   /* ---------- time of day ---------- */
   function setTimeOfDay(name) {
     tod = TOD[name] ?? TOD.day;
-    // redraw sky gradient — canvas TOP = zenith, position 0.5 = horizon (r6)
-    const ctx = sky.material.map.image.getContext('2d');
-    const gr = ctx.createLinearGradient(0, 0, 0, 512);
-    gr.addColorStop(0, tod.skyTop);
-    gr.addColorStop(0.28, tod.skyMid);
-    gr.addColorStop(0.5, tod.skyBot);
-    if (tod.skyLow) gr.addColorStop(0.47, tod.skyLow); // warm band just over the horizon
-    gr.addColorStop(1, tod.skyBot);
-    ctx.fillStyle = gr; ctx.fillRect(0, 0, 64, 512);
-    sky.material.map.needsUpdate = true;
+    setSkyDome(sky, tod); // gradient + real sun disc at the sunRig azimuth
 
     // fog fades to the horizon band of the sky (GRAPHICS_PLAN §1.4)
     // fog can sit deeper than the sky's horizon band: a pastel-bright horizon
@@ -504,8 +523,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.scene.background.set(tod.skyBot);
     world.setExposure(tod.exposure);
     // env gets the sun blob so the water shows a real specular glint at the
-    // sun azimuth (critic r7: water had zero reflection/specular)
-    world.setEnvironment(tod.skyTop, tod.skyMid, tod.skyBot, '#a68a5e', { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }); // bank bounce
+    // sun azimuth (r7) — envSun scales it (dim moon glint at night, r10 #5)
+    world.setEnvironment(tod.skyTop, tod.skyMid, tod.skyBot, '#a68a5e', { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }, tod.envSun); // bank bounce
     world.sunRig.set(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
     world.sun.color.set(tod.sunColor);
     world.sun.intensity = tod.sunIntensity;
@@ -513,16 +532,11 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.hemi.groundColor.set(tod.hemiGround);
     world.hemi.intensity = tod.hemiIntensity;
     world.ambient.intensity = tod.ambient;
-    // visible sun disc rides the sunRig direction (anchor for the warm light)
-    const rigLen = Math.hypot(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
-    sunDisc.position.set(tod.sunRig[0] / rigLen * 550, tod.sunRig[1] / rigLen * 550, tod.sunRig[2] / rigLen * 550);
-    sunDisc.userData.skyZ0 = sunDisc.position.z; // re-stamp backdrop offset (was captured before placement)
-    sunDisc.material.opacity = name === 'sunset' ? 0.7 : 0;
     // glitter stripe toward the sun azimuth, laid from the player outwards
     glitterDir.x = tod.sunRig[0] / Math.hypot(tod.sunRig[0], tod.sunRig[2]);
     glitterDir.z = tod.sunRig[2] / Math.hypot(tod.sunRig[0], tod.sunRig[2]);
     glitter.rotation.z = Math.atan2(glitterDir.x, glitterDir.z);
-    glitter.material.opacity = name === 'sunset' ? 0.3 : 0; // focal glint path (critic r7)
+    glitter.material.opacity = name === 'sunset' ? 0.42 : 0; // focal glint path — on the darker r11 water it reads as THE sun path (critic r7)
     starMat.opacity = tod.stars;
     moonGlow.material.opacity = name === 'night' ? 0.5 : 0;
     moon.visible = name === 'night';
@@ -530,8 +544,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     waterMat.envMapIntensity = tod.waterEnv; // warm sky path on the water at sunset
     // reeds take the ambient tint: orange sunset warms them off pure green
     // (critic r5: reeds kept their day green under orange light)
-    reedMat.color.set(name === 'sunset' ? '#7d6f3c' : name === 'night' ? '#2c3a2a' : '#4d7d3a');
-    pools.forEach((p) => (p.material.opacity = tod.lanterns * 0.55));
+    reedMat.color.set(name === 'sunset' ? '#5c5638' : name === 'night' ? '#2c3a2a' : '#4d7d3a');
+    poolMat.opacity = tod.lanterns * 0.55;
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
     vehicles.forEach((v) => {
       v.navMats.forEach((m) => (m.opacity = tod.navLights));
@@ -541,6 +555,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   setTimeOfDay(timeOfDay);
 
   /* ---------- per-frame ---------- */
+  // reused temporaries — update() must not allocate (SPEC §1.3)
+  const _buoyM = new THREE.Matrix4();
+  const _buoyQ = new THREE.Quaternion();
+  const _buoyV = new THREE.Vector3();
+  const _UNIT = new THREE.Vector3(1, 1, 1);
+  const _ZAXIS = new THREE.Vector3(0, 0, 1);
   function update(dt, state) {
     if (!state) return;
     const now = performance.now();
@@ -552,12 +572,25 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     const p0 = vehicles[0]?.group.position;
     if (p0) glitter.position.set(p0.x + glitterDir.x * 145, 0.47, p0.z + glitterDir.z * 145);
 
-    // flowing water + bobbing buoys
+    // flowing water + bobbing buoys — three layers scroll at different speeds
+    // so the ripple normals shimmer against the stain albedo (r10 water pass)
     waterTex.offset.y -= dt * 0.06;
-    for (const b of buoyGroups) {
-      b.position.y = 0.42 + Math.sin(now / 500 + b.userData.phase) * 0.09;
-      b.rotation.z = Math.sin(now / 650 + b.userData.phase) * 0.12;
+    waterMat.normalMap.offset.y -= dt * 0.11;
+    waterMat.normalMap.offset.x += dt * 0.014;
+    waterMat.roughnessMap.offset.y -= dt * 0.09;
+    // bobbing buoys: one reused matrix per buoy, written into both instanced
+    // meshes (body +0.22, pole +0.6 — the old Group offsets)
+    for (let bi = 0; bi < BUOY_N; bi++) {
+      const ph = buoyPhase[bi];
+      const bobY = 0.42 + Math.sin(now / 500 + ph) * 0.09;
+      _buoyQ.setFromAxisAngle(_ZAXIS, Math.sin(now / 650 + ph) * 0.12);
+      _buoyM.compose(_buoyV.set(buoyX[bi], bobY + 0.22, buoyZ[bi]), _buoyQ, _UNIT);
+      buoyBodies.setMatrixAt(bi, _buoyM);
+      _buoyM.compose(_buoyV.set(buoyX[bi], bobY + 0.6, buoyZ[bi]), _buoyQ, _UNIT);
+      buoyPoles.setMatrixAt(bi, _buoyM);
     }
+    buoyBodies.instanceMatrix.needsUpdate = true;
+    buoyPoles.instanceMatrix.needsUpdate = true;
 
     state.forEach((rs, i) => {
       const v = vehicles[i];

@@ -3,34 +3,45 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, makeSunDisc } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, createSkyDome, setSkyDome, makeGroundPBR, rampHex, mergeStaticMeshes, makeDunes, displaceGroundPlane, jitterRock } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
 const TOD = {
-  // "day" reads as a bright launch-day sky (critic r2: navy+stars had no day
-  // logic). stars 0 by day (critic r4: stars in a day sky), plume per TOD so
-  // the jet reads at noon but doesn't burn at night, jetLight tamed (r4 halo)
+  // r10 #2: rocket-day must read FULL DAYLIGHT like refs/real-world/
+  // real-day-launch.jpg — deep blue zenith, pale haze horizon, bright concrete
+  // pad, strong sun. The pad was near-navy and the sun a washed blob; now the
+  // strip is textured concrete, the dome carries the gradient + a real ~2° sun
+  // disc, and exposure/sun intensity are raised.
   day: {
     // sun forward-upper-left (rig z<0 = in frame above the horizon) so the
     // disc is visible AND the asteroid lit-faces/shadow agree with it
-    // (critic r7). y=12 → elevation ≈12°: 18° still clipped at the top edge
-    bg: '#4f86c0', fogDensity: 0.0016, exposure: 1.0, sunRig: [-34, 12, -46],
-    sunColor: '#fffbe8', sunIntensity: 2.3,
-    hemiSky: '#9fd0ff', hemiGround: '#1c2c44', hemiIntensity: 0.35,
-    ambient: 0.08, stars: 0.0, rings: 1.0, glow: 0.6, jetLight: 26, plume: 0.85,
+    // (critic r7). y=14 keeps the disc clear of the top edge.
+    bg: '#b8d4ea', fogDensity: 0.0016, exposure: 1.08,
+    skyTop: '#1e56b0', skyMid: '#4f86c0', skyBot: '#b8d4ea',
+    sunRig: [-34, 14, -46], sunDisc: 1.2, envSun: 1.0,
+    sunColor: '#fffbe8', sunIntensity: 3.0,
+    hemiSky: '#b8dcff', hemiGround: '#5a6048', hemiIntensity: 0.5,
+    ambient: 0.05, stars: 0.0, rings: 1.0, glow: 0.6, jetLight: 26, plume: 0.85,
   },
   sunset: {
-    bg: '#2a1436', fogDensity: 0.0014, exposure: 0.85, sunRig: [30, 16, 44],
+    bg: '#2a1436', fogDensity: 0.0014, exposure: 0.85,
+    skyTop: '#1a0e28', skyMid: '#2a1436', skyBot: '#5a3a5a',
+    sunRig: [30, 16, 44], sunDisc: 0.8, sunTint: '#ffb37a', envSun: 0.5,
     sunColor: '#ffb37a', sunIntensity: 1.3,
     hemiSky: '#d88fb0', hemiGround: '#241430', hemiIntensity: 0.28,
     ambient: 0.08, stars: 0.8, rings: 1.0, glow: 0.8, jetLight: 34, plume: 0.9,
   },
   night: {
-    bg: '#04060f', fogDensity: 0.0016, exposure: 0.6, sunRig: [-30, 20, 50],
+    // r10 #5: engine-bell/fin rims glowed hotter than physical — envSun 0.12
+    // (dim moon glint) + jetLight 42→34 keeps the plume readable without the
+    // rim-lit halo
+    bg: '#04060f', fogDensity: 0.0016, exposure: 0.6,
+    skyTop: '#01030a', skyMid: '#04060f', skyBot: '#0a1226',
+    sunRig: [-30, 20, 50], sunDisc: 0, envSun: 0.12,
     sunColor: '#8fa8ff', sunIntensity: 0.9,
     hemiSky: '#2c4a70', hemiGround: '#0a0f18', hemiIntensity: 0.65,
-    ambient: 0.06, stars: 1.0, rings: 1.4, glow: 1.0, jetLight: 42, plume: 0.65,
+    ambient: 0.06, stars: 1.0, rings: 1.4, glow: 1.0, jetLight: 34, plume: 0.65,
   },
 };
 
@@ -89,7 +100,9 @@ function buildRocket(color, { player = false } = {}) {
   g.add(port);
 
   // fins (rear, +Z) — slim swept X-formation: the outer edge tapers so the
-  // fins read as fins, not flat cross-boards (critic r6, §5.3)
+  // fins read as fins, not flat cross-boards (critic r6, §5.3); all four merge
+  // into one draw call (§1.3)
+  const fins = [];
   const finGeo = new THREE.BoxGeometry(0.07, 0.72, 0.62);
   {
     const fp = finGeo.attributes.position;
@@ -107,8 +120,9 @@ function buildRocket(color, { player = false } = {}) {
     fin.position.set(Math.cos(a) * 0.52, 1.3 + Math.sin(a) * 0.52, 1.5);
     fin.rotation.z = a + Math.PI / 2;
     fin.castShadow = true;
-    g.add(fin);
+    fins.push(fin);
   }
+  g.add(new THREE.Mesh(mergeStaticMeshes(fins), accent)); // 4 fins → 1 draw
 
   // engine bell — LOW env response: sooty metal must not mirror the sky env
   // (the env sun blob turned the bell/cap into a cream mirror disc, r7 shot)
@@ -214,16 +228,43 @@ function buildRocket(color, { player = false } = {}) {
   hover.position.set(0.4, 0.045, 0.75);
   g.add(hover);
 
-  return { group: g, jet, jetMat, jetCore, jetCoreMat, jetColumnMat, jetGlowMat, smearMat, trail, light };
+  return { group: g, jet, jetMat, jetCore, jetCoreMat, jetColumnMat, jetGlowMat, smearMat, trail, light, shellMat: shell, accentMat: accent };
 }
 
 export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const rng = mulberry32(seed);
   const group = new THREE.Group();
   let tod = TOD[timeOfDay] ?? TOD.day;
+  let plumeK = 1;                  // TOD scale for the additive plume stack — night
+                                   // rims must stay dim (critic r10 #5); declared
+                                   // here because setTimeOfDay() runs at create-time
+  // reused temporaries for the instanced asteroids/rings — update() must not
+  // allocate (SPEC §1.3); declared before the build blocks that use them
+  const _rm4 = new THREE.Matrix4();
+  const _rv = new THREE.Vector3();
+  const _rs = new THREE.Vector3(1, 1, 1);
+  const _rq = new THREE.Quaternion();
+  const _re = new THREE.Euler();
 
   /* ---------- energy highway ---------- */
-  const stripMat = new THREE.MeshStandardMaterial({ color: '#0e2f4a', roughness: 0.4, metalness: 0.6, transparent: true, opacity: 0.72, emissive: '#0a2a44', emissiveIntensity: 0.5 });
+  // r10 #2: the pad read near-navy and dusk-like. Now: light concrete PBR
+  // (aggregate speckle + normal relief + roughness variation), like the real
+  // launch-complex imagery. Opaque — transparency was a haze crutch.
+  const padPBR = makeGroundPBR({
+    seed: 88, octaves: 5, firstLattice: 4, gain: 0.5, normalStrength: 2.6,
+    // warmed toward the tan concrete of the real launch-complex photo — the
+    // r10 ramp + blue emissive gave the pad a cold navy cast in daylight
+    color: rampHex(['#98938a', '#b0aba0', '#bcb7ac', '#a49f96']),
+    rough: (h) => 0.72 + h * 0.2,
+  });
+  padPBR.map.repeat.set(7, 530);        // ~1.9m tile → 4cm aggregate
+  padPBR.normalMap.repeat.set(7, 530);
+  padPBR.roughMap.repeat.set(7, 530);
+  const stripMat = new THREE.MeshStandardMaterial({
+    color: '#ffffff', map: padPBR.map, normalMap: padPBR.normalMap,
+    roughnessMap: padPBR.roughMap, roughness: 1, metalness: 0.1,
+    emissive: '#0a2a44', emissiveIntensity: 0.5, envMapIntensity: 0.4,
+  });
   const strip = new THREE.Mesh(
     new THREE.PlaneGeometry(13.4, TRACK_LENGTH + 160),
     stripMat
@@ -274,10 +315,37 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(atmo);
 
   // launch-complex ground far below the strip — horizon context so the rocks
-  // don't float in an empty gradient (critic r5, real-day-launch)
+  // don't float in an empty gradient (critic r5). r10: olive-tan terrain like
+  // the real-day-launch photo foreground, not navy (r10 #2). r11: macro
+  // patches (scrub vs sandy clearings) so it stops reading as one flat olive
+  const terrainPBR = makeGroundPBR({
+    seed: 43, octaves: 5, firstLattice: 3, gain: 0.55, normalStrength: 2.0,
+    color: rampHex(['#3e4a2e', '#55603a', '#63683c', '#4a5230']),
+    rough: (h) => 0.9 + h * 0.08,
+    macro: {
+      seed: 437, firstLattice: 2, amount: 0.35,
+      color: rampHex(['#5a5c36', '#8a8256', '#6e7040']),
+    },
+  });
+  terrainPBR.map.repeat.set(48, 72);
+  terrainPBR.normalMap.repeat.set(48, 72);
+  terrainPBR.roughMap.repeat.set(48, 72);
+  // r11: low rolling hills on the far terrain — the r10 ground/sky junction
+  // was one dead-straight line across the whole shot (photo tell). No props
+  // sit on this plane (asteroids float), so displacement is free of grounding.
+  const groundDunes = makeDunes(4300, { cell: 170, octaves: 3, gain: 0.5 });
+  const groundFade = (x) => { // flat under the strip, rolling beyond its edge
+    const t = Math.min(1, Math.max(0, (Math.abs(x) - 9) / 26));
+    return t * t * (3 - 2 * t);
+  };
+  const groundGeo = new THREE.PlaneGeometry(1600, 2400, 64, 96);
+  displaceGroundPlane(groundGeo, groundDunes, { amp: 4.5, fadeFn: groundFade });
   const launchGround = new THREE.Mesh(
-    new THREE.PlaneGeometry(1600, 2400),
-    new THREE.MeshStandardMaterial({ color: '#182839', roughness: 1 })
+    groundGeo,
+    new THREE.MeshStandardMaterial({
+      color: '#ffffff', map: terrainPBR.map, normalMap: terrainPBR.normalMap,
+      roughnessMap: terrainPBR.roughMap, roughness: 1, envMapIntensity: 0.2,
+    })
   );
   launchGround.rotation.x = -Math.PI / 2;
   launchGround.position.set(0, -14, -TRACK_LENGTH / 2);
@@ -285,31 +353,55 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(launchGround);
 
   /* ---------- ring gates ---------- */
-  const ringMats = [];
-  const rings = [];
-  for (let i = 0; i < 12; i++) {
-    const mat = new THREE.MeshBasicMaterial({ color: i % 2 ? '#3fb0cc' : '#5a6a8a', transparent: true, opacity: 0.3 });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(7.4, 0.16, 8, 40), mat);
-    ring.position.set(0, 1.4, -40 - i * (TRACK_LENGTH / 12));
-    group.add(ring);
-    ringMats.push(mat);
-    rings.push(ring);
+  // ONE InstancedMesh + per-instance color (alternating teal/steel) instead of
+  // 12 meshes — 12 → 1 draw calls (§1.3). The old per-ring spin about z was
+  // invisible on a rotationally-symmetric torus; the pulse stays (single phase).
+  const ringGeo = new THREE.TorusGeometry(7.4, 0.16, 8, 40);
+  const ringMat = new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.3 });
+  const RING_N = 12;
+  const rings = new THREE.InstancedMesh(ringGeo, ringMat, RING_N);
+  rings.frustumCulled = false;
+  {
+    const _rq = new THREE.Quaternion();
+    const _rc = new THREE.Color();
+    for (let i = 0; i < RING_N; i++) {
+      _rm4.compose(_rv.set(0, 1.4, -40 - i * (TRACK_LENGTH / RING_N)), _rq, _rs.set(1, 1, 1));
+      rings.setMatrixAt(i, _rm4);
+      _rc.set(i % 2 ? '#3fb0cc' : '#5a6a8a');
+      rings.setColorAt(i, _rc);
+    }
+    rings.instanceColor.needsUpdate = true;
   }
+  group.add(rings);
 
   /* ---------- asteroids ---------- */
+  // ONE InstancedMesh with per-instance spin/drift state in typed arrays —
+  // 46 rocks were 46 draw calls (§1.3); composing reuses module temporaries.
   const rockMat = new THREE.MeshStandardMaterial({ color: '#6e7684', roughness: 1, flatShading: true });
-  const asteroids = [];
-  for (let i = 0; i < 46; i++) {
-    const s = 0.5 + rng() * 3.2;
-    const a = new THREE.Mesh(new THREE.DodecahedronGeometry(s, 0), rockMat);
-    const side = rng() > 0.5 ? 1 : -1;
-    a.position.set(side * (14 + rng() * 60), rng() * 26 - 4, 16 - rng() * (TRACK_LENGTH + 60));
-    a.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    a.userData.spin = (rng() - 0.5) * 0.6;
-    a.userData.drift = rng() * 10;
-    group.add(a);
-    asteroids.push(a);
+  const AST_N = 46;
+  const asteroids = new THREE.InstancedMesh(jitterRock(new THREE.DodecahedronGeometry(1, 0), { amp: 0.28, seed: 46, freq: 3.0 }), rockMat, AST_N);
+  asteroids.frustumCulled = false;
+  const astX = new Float32Array(AST_N), astY = new Float32Array(AST_N), astZ = new Float32Array(AST_N);
+  const astS = new Float32Array(AST_N), astRX = new Float32Array(AST_N), astRY = new Float32Array(AST_N);
+  const astSpin = new Float32Array(AST_N), astDrift = new Float32Array(AST_N), astDY = new Float32Array(AST_N);
+  {
+    const _rq2 = new THREE.Quaternion();
+    for (let i = 0; i < AST_N; i++) {
+      const s = 0.5 + rng() * 3.2;
+      const side = rng() > 0.5 ? 1 : -1;
+      astX[i] = side * (14 + rng() * 60);
+      astY[i] = rng() * 26 - 4;
+      astZ[i] = 16 - rng() * (TRACK_LENGTH + 60);
+      astS[i] = s;
+      astRX[i] = rng() * 3; astRY[i] = rng() * 3;
+      astSpin[i] = (rng() - 0.5) * 0.6;
+      astDrift[i] = rng() * 10;
+      _rq2.setFromEuler(_re.set(astRX[i], astRY[i], 0));
+      _rm4.compose(_rv.set(astX[i], astY[i], astZ[i]), _rq2, _rs.set(s, s, s));
+      asteroids.setMatrixAt(i, _rm4);
+    }
   }
+  group.add(asteroids);
 
   /* ---------- holo signs ---------- */
   const slogans = ['TYPE FASTER!', 'WPM > gravity', 'Orbit Dash', '🚤 boats SOON', '🐎 horses SOON', 'to infinity…'];
@@ -359,20 +451,22 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     nebulas.push(sp);
   }
 
-  // launch-day sun — the visible source for the warm directional light
-  // (critic r5: day sky had no sun)
-  const sunDisc = makeSunDisc('#fff3d0');
-  group.add(sunDisc);
+  // launch-day sky dome — deep blue zenith → pale haze horizon with a real
+  // ~2° sun disc (shared.js), replacing the flat background + washed 90-unit
+  // sprite blob (critic r10 #2). Stars sit INSIDE the dome radius so they
+  // still show at night.
+  const sky = createSkyDome(620);
+  group.add(sky);
 
   // stars/nebulas ride along with the player, and Earth stays centered below
   // (otherwise the camera exits the "sky" mid-track)
-  const celestial = [stars, ...nebulas, sunDisc];
+  const celestial = [sky, stars, ...nebulas];
 
   /* ---------- start + finish ---------- */
   const gateZ = buildFinishGate(group, TRACK_LENGTH, { text: '🚀 FINISH 🚀' });
   const startTex = canvasTexture((ctx) => {
     for (let y = 0; y < 2; y++) for (let x = 0; x < 14; x++) {
-      ctx.fillStyle = (x + y) % 2 ? '#0a2a44' : '#6f98a4';
+      ctx.fillStyle = (x + y) % 2 ? '#3a3f44' : '#d8dade'; // concrete + worn white
       ctx.fillRect(x * 20, y * 20, 20, 20);
     }
   }, 280, 40);
@@ -411,12 +505,13 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   /* ---------- time of day (space tints) ---------- */
   function setTimeOfDay(name) {
     tod = TOD[name] ?? TOD.day;
+    setSkyDome(sky, tod); // gradient sky + real sun disc (r10 #2)
     world.scene.background.set(tod.bg);
     // space fog: thin — only darkens far asteroids, never a curtain
     // (GRAPHICS_PLAN §3.4); FogExp2 replaces the old linear near/far
     world.setFog(tod.bg, tod.fogDensity);
     world.setExposure(tod.exposure);
-    world.setEnvironment(tod.bg, tod.bg, tod.bg, '#0a1626', { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }); // void + earthshine + sun glint
+    world.setEnvironment(tod.skyTop, tod.skyMid, tod.skyBot, '#5a6048', { x: tod.sunRig[0], y: tod.sunRig[1], z: tod.sunRig[2] }, tod.envSun); // terrain bounce + sun glint (envSun: dim at night, r10 #5)
     world.sunRig.set(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
     world.sun.color.set(tod.sunColor);
     world.sun.intensity = tod.sunIntensity;
@@ -424,32 +519,38 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.hemi.groundColor.set(tod.hemiGround);
     world.hemi.intensity = tod.hemiIntensity;
     world.ambient.intensity = tod.ambient;
-    // visible sun rides the rig direction (critic r5: day sky had no sun)
-    const rigLen2 = Math.hypot(tod.sunRig[0], tod.sunRig[1], tod.sunRig[2]);
-    sunDisc.position.set(tod.sunRig[0] / rigLen2 * 550, tod.sunRig[1] / rigLen2 * 550, tod.sunRig[2] / rigLen2 * 550);
-    sunDisc.userData.skyZ0 = sunDisc.position.z;
     starMat.opacity = tod.stars;
-    nebulas.forEach((n) => (n.material.opacity = name === 'night' ? 0.2 : name === 'sunset' ? 0.17 : 0.1));
+    nebulas.forEach((n) => (n.material.opacity = name === 'night' ? 0.2 : name === 'sunset' ? 0.17 : 0.06));
     // rings at physical subtlety — no neon arcade hoops in the sky (critic r5)
-    ringMats.forEach((m) => (m.opacity = Math.min(0.13, 0.22 * tod.rings)));
-    dashMat.color.set(name === 'night' ? '#22485a' : '#57909e'); // muted teal paint (r5)
+    ringMat.opacity = Math.min(0.13, 0.22 * tod.rings);
+    // worn runway paint on concrete: pale yellow by day, faint at night (r5)
+    dashMat.color.set(name === 'night' ? '#3d4a52' : '#d8d2b8');
     dashMat.opacity = name === 'night' ? 0.45 : 1.0; // de-neon the lane dashes (r4/r7)
     edgeMat.color.set(name === 'night' ? '#26304a' : '#3a465e'); // rails lit, not self-lit (r7)
-    stripMat.emissiveIntensity = name === 'night' ? 0.32 : 0.5; // corridor must stay readable at night (r9 critic: black void)
+    // night: darken the concrete albedo + faint blue emissive so the corridor
+    // stays readable but the pad does not glow like a lamp (r9/r10)
+    stripMat.color.set(name === 'night' ? '#3a4148' : name === 'sunset' ? '#787878' : '#ffffff');
+    stripMat.emissiveIntensity = name === 'night' ? 0.32 : name === 'sunset' ? 0.4 : 0.04;
     holoMats.forEach((m) => (m.opacity = name === 'night' ? 0.5 : name === 'sunset' ? 0.7 : 0.9));
-    sunDisc.material.opacity = name === 'day' ? 0.75 : name === 'sunset' ? 0.6 : 0; // readable source (r7)
+    plumeK = name === 'night' ? 0.5 : name === 'sunset' ? 0.75 : 1.0; // dims the
+    // additive cones that back-light the bell rim + fin edges at night (r10 #5)
     vehicles.forEach((v) => {
-      v.jetMat.opacity = tod.plume;
-      v.jetCoreMat.opacity = tod.plume * 0.55; // core keeps color, reads in daylight (r6/r7 burn fix)
-      v.jetColumnMat.opacity = tod.plume * 0.24;
-      if (v.smearMat) v.smearMat.opacity = Math.max(0.3, tod.plume * 0.4); // bots read too (r4)
+      v.jetMat.opacity = tod.plume * plumeK;
+      v.jetCoreMat.opacity = tod.plume * 0.55 * plumeK; // core keeps color, reads in daylight (r6/r7 burn fix)
+      v.jetColumnMat.opacity = tod.plume * 0.24 * plumeK;
+      if (v.smearMat) v.smearMat.opacity = Math.max(0.18, tod.plume * 0.4 * plumeK); // bots read too (r4)
       if (v.light) v.light.intensity = tod.jetLight; // player only — the jet is the lamp
+      // sooty metal must not mirror the env sun — night rims stay physical
+      // (r7 note + r10 #5); day: real glints on the white shell
+      const vehEnv = name === 'night' ? 0.2 : name === 'sunset' ? 0.45 : 0.8;
+      v.shellMat.envMapIntensity = vehEnv;
+      v.accentMat.envMapIntensity = vehEnv;
     });
   }
   setTimeOfDay(timeOfDay);
 
   /* ---------- per-frame ---------- */
-  const _tv = new THREE.Vector3(); // reused trail sampler (no per-frame alloc)
+  const _tv = new THREE.Vector3(); // reused trail sampler (no per-frame alloc);
   function update(dt, state) {
     if (!state) return;
     const now = performance.now();
@@ -460,18 +561,23 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     earth.position.z = anchorZ;
     atmo.position.z = anchorZ;
 
-    // slow planet spin + drifting asteroids + pulsing rings
+    // slow planet spin + drifting asteroids + pulsing rings — asteroid
+    // spin/drift live in typed arrays, matrices composed with reused temps
     earth.rotation.y += dt * 0.01;
-    for (const a of asteroids) {
-      a.rotation.x += a.userData.spin * dt;
-      a.rotation.y += a.userData.spin * 0.7 * dt;
-      a.position.y += Math.sin(now / 2600 + a.userData.drift) * dt * 0.4;
+    for (let i = 0; i < AST_N; i++) {
+      astRX[i] += astSpin[i] * dt;
+      astRY[i] += astSpin[i] * 0.7 * dt;
+      astDY[i] += Math.sin(now / 2600 + astDrift[i]) * dt * 0.4;
+      _re.set(astRX[i], astRY[i], 0);
+      _rq.setFromEuler(_re);
+      _rm4.compose(_rv.set(astX[i], astY[i] + astDY[i], astZ[i]), _rq, _rs.set(astS[i], astS[i], astS[i]));
+      asteroids.setMatrixAt(i, _rm4);
     }
-    rings.forEach((ring, i) => {
-      const pulse = 0.22 + Math.sin(now / 600 + i * 0.8) * 0.08; // low ceiling — no neon
-      ringMats[i].opacity = Math.min(0.35, pulse * tod.rings);
-      ring.rotation.z += dt * 0.15;
-    });
+    asteroids.instanceMatrix.needsUpdate = true;
+    // ring pulse: one shared phase (per-ring offsets were invisible at ≤0.13
+    // opacity and forced 12 separate materials)
+    const pulse = 0.22 + Math.sin(now / 600) * 0.08; // low ceiling — no neon
+    ringMat.opacity = Math.min(0.35, pulse * tod.rings);
 
     state.forEach((rs, i) => {
       const v = vehicles[i];
@@ -485,10 +591,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       v.jet.scale.set(0.7 + power * 0.7, power * flicker, 0.7 + power * 0.7);
       // end-on (chase cam) the additive cones stack into one disc — keep the
       // rest-state stack dim so the core keeps color, not white (critic r7)
-      v.jetMat.opacity = Math.min(0.45, 0.1 + s01 * 0.3 + heat * 0.3);
+      v.jetMat.opacity = Math.min(0.45, 0.1 + s01 * 0.3 + heat * 0.3) * plumeK;
       v.jetCore.scale.set(0.8 + heat * 0.9, power * flicker, 0.8 + heat * 0.9);
-      v.jetCoreMat.opacity = Math.min(0.42, 0.12 + s01 * 0.2 + heat * 0.25);
-      v.jetGlowMat.opacity = Math.min(0.1, 0.03 + power * 0.06); // halo must not swallow the fins (r7)
+      v.jetCoreMat.opacity = Math.min(0.42, 0.12 + s01 * 0.2 + heat * 0.25) * plumeK;
+      v.jetGlowMat.opacity = Math.min(0.1, 0.03 + power * 0.06) * plumeK; // halo must not swallow the fins (r7)
 
       // vapor trail: sample the nozzle every 40ms into the ring buffer and
       // fade every point's additive color toward black with age
