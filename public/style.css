@@ -358,9 +358,69 @@ body {
   text-transform: uppercase; color: var(--faint);
 }
 .setupRow .opt { font-size: 10px; font-weight: 550; letter-spacing: 0.04em; text-transform: none; color: var(--faint); opacity: 0.85; }
+.setupRow[hidden] { display: none !important; }
+.setupRowWide { grid-column: 1 / -1; }
+
+/* mode cards — compact pickers, one per game mode */
+.modeGrid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 10px;
+}
+.modeCard {
+  position: relative; padding: 12px 12px 11px;
+  border-radius: 14px; cursor: pointer; user-select: none;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: transform 0.25s var(--spring), border-color 0.2s, background 0.2s, box-shadow 0.25s;
+}
+@media (hover: hover) {
+  .modeCard:hover { transform: translateY(-3px); border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.09); }
+}
+.modeCard .ic { font-size: 21px; line-height: 1; transition: transform 0.25s var(--spring); }
+.modeCard:hover .ic { transform: scale(1.14) rotate(-4deg); }
+.modeCard .nm { font-size: 12.5px; font-weight: 750; letter-spacing: -0.01em; margin-top: 7px; }
+.modeCard .ds { font-size: 9.8px; line-height: 1.4; color: var(--faint); margin-top: 3px; }
+.modeCard.active {
+  border-color: rgba(90, 209, 255, 0.65);
+  background: linear-gradient(180deg, rgba(90, 209, 255, 0.14), rgba(139, 123, 255, 0.08));
+  box-shadow: 0 0 0 1px rgba(90, 209, 255, 0.35), 0 8px 28px rgba(90, 209, 255, 0.16);
+}
+.modeCard.active::after {
+  content: '✓'; position: absolute; top: 9px; right: 10px;
+  width: 17px; height: 17px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 9.5px; font-weight: 800; color: #05121d;
+  background: var(--cyan); box-shadow: 0 0 10px rgba(90, 209, 255, 0.7);
+}
+
+/* bot battle config */
+.botCfg { display: flex; align-items: center; gap: 8px; }
+.botCfg select { flex: 1; min-width: 0; }
+#botWpm { width: 92px; flex: none; }
+/* number input spinners look bad on glass — hide them */
+#botWpm::-webkit-outer-spin-button, #botWpm::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#botWpm { -moz-appearance: textfield; appearance: textfield; }
+.botCfg .unit { font-size: 10.5px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+
+/* custom text */
+.setupRow textarea {
+  width: 100%; padding: 12px 14px; font-family: var(--font); font-size: 13.5px; line-height: 1.55;
+  color: var(--text); border-radius: var(--r-sm); resize: vertical; min-height: 76px; max-height: 220px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+}
+.setupRow textarea::placeholder { color: var(--faint); }
+.setupRow textarea:focus {
+  outline: none; border-color: rgba(90, 209, 255, 0.6);
+  background: rgba(90, 209, 255, 0.07);
+  box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.16);
+}
+
 
 .userRow { display: flex; gap: 8px; }
-#userInput, .setupRow select {
+#userInput, #botWpm, .setupRow select {
   width: 100%; padding: 12px 14px; font-family: var(--font); font-size: 13.5px; font-weight: 500;
   color: var(--text); border-radius: var(--r-sm);
   background: rgba(255, 255, 255, 0.055);
@@ -368,8 +428,8 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
-#userInput::placeholder { color: var(--faint); }
-#userInput:focus, .setupRow select:focus {
+#userInput::placeholder, #botWpm::placeholder { color: var(--faint); }
+#userInput:focus, #botWpm:focus, .setupRow select:focus {
   outline: none; border-color: rgba(90, 209, 255, 0.6);
   background: rgba(90, 209, 255, 0.07);
   box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.16);
@@ -425,6 +485,72 @@ body {
 }
 .menuBadge.err { color: var(--red); }
 .credits { margin-top: 8px; text-align: center; font-size: 10.5px; color: var(--faint); letter-spacing: 0.02em; }
+
+/* ── your stats (local) ── */
+.statsPanel { margin-top: 18px; padding: 18px 24px 20px; border-radius: var(--r-lg); }
+.sectionHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.sectionHead h2 {
+  margin: 0; font-size: 12px; font-weight: 750; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--dim);
+}
+#resetStats {
+  padding: 5px 13px; border-radius: 999px; cursor: pointer;
+  font-family: var(--font); font-size: 10.5px; font-weight: 650; color: var(--faint);
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+#resetStats:hover { color: var(--red); border-color: rgba(255, 99, 99, 0.4); background: rgba(255, 99, 99, 0.08); }
+.statsCards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.statCard {
+  padding: 13px 15px 11px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.statCard b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.statCard b small { font-size: 10px; font-weight: 600; color: var(--faint); letter-spacing: 0; }
+.statCard label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+.statsEmpty { font-size: 12.5px; color: var(--faint); padding: 6px 0 2px; }
+.recentRuns { margin-top: 12px; display: grid; gap: 6px; }
+.runRow {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 12px; color: var(--dim);
+  padding: 8px 13px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.runRow .rIc { font-size: 14px; }
+.runRow .rWpm b { color: var(--text); font-size: 13px; }
+.runRow .rAcc, .runRow .rPlace { color: var(--faint); font-size: 11.5px; }
+.runRow .ago { margin-left: auto; font-size: 10.5px; color: var(--faint); }
+
+/* ── help / how to play ── */
+details.help { margin-top: 16px; padding: 4px 24px; border-radius: var(--r-lg); }
+details.help summary {
+  display: flex; align-items: center; cursor: pointer; list-style: none;
+  padding: 15px 0; font-size: 12px; font-weight: 750; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--dim);
+}
+details.help summary::-webkit-details-marker { display: none; }
+details.help summary::after {
+  content: '▸'; margin-left: auto; color: var(--faint);
+  transition: transform 0.25s var(--spring);
+}
+details.help[open] summary::after { transform: rotate(90deg); }
+.helpBody { padding: 2px 0 20px; font-size: 13px; line-height: 1.75; color: var(--dim); }
+.helpBody p { margin: 6px 0; }
+.helpBody h3 {
+  margin: 16px 0 6px; font-size: 10.5px; font-weight: 800;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint);
+}
+.helpBody h3:first-child { margin-top: 4px; }
+.helpBody ul { margin: 6px 0; padding-left: 20px; }
+.helpBody li { margin: 6px 0; }
+.helpBody li b { color: var(--text); }
+.helpBody kbd {
+  font-family: var(--font); font-size: 10.5px; font-weight: 700; color: var(--text);
+  padding: 2px 8px; margin: 0 2px; border-radius: 6px; white-space: nowrap;
+  background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+}
 
 /* ────────────────────────────── RESULTS ───────────────────────────────── */
 

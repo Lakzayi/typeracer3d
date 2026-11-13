@@ -9,6 +9,10 @@ import { TypingEngine } from './typing.js';
 import { RaceController } from './race.js';
 import { HUD } from './hud.js';
 import { Sound } from './sound.js';
+import { MODES, SOLO_MODES, REAL_DATA_MODES, SHAREABLE_RACE_MODES } from './modes.js';
+import { drillRace } from './drills.js';
+import { recordRace, renderStatsPanel, resetStats } from './stats.js';
+import { demoRace } from './demo-data.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -99,6 +103,48 @@ function buildThemeCards() {
   }
 }
 
+/* ---------------- game mode cards (7 modes) ---------------- */
+
+const BOT_NAMES = ['Nova', 'Blitz', 'Comet', 'Vega', 'Echo', 'Turbo', 'Pixel', 'Onyx', 'Zephyr', 'Quark', 'Jolt', 'Rune'];
+
+function buildModeCards() {
+  const wrap = $('modeCards');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const cur = $('gameMode').value;
+  for (const [id, m] of Object.entries(MODES)) {
+    const card = document.createElement('div');
+    card.className = 'modeCard' + (id === cur ? ' active' : '');
+    card.innerHTML = `<div class="ic">${m.icon}</div><div class="nm">${m.name}</div><div class="ds">${m.desc}</div>`;
+    card.addEventListener('click', () => setMode(id));
+    wrap.appendChild(card);
+  }
+}
+
+function setMode(mode) {
+  if (!MODES[mode]) return;
+  $('gameMode').value = mode;
+  settings.mode = mode;
+  saveSettings();
+  buildModeCards();
+  syncModeRows();
+}
+
+/* only the rows relevant to the picked mode stay visible */
+function syncModeRows() {
+  const mode = $('gameMode').value;
+  const realRace = REAL_DATA_MODES.includes(mode);
+  $('usernameRow').hidden = !realRace;
+  $('difficultyRow').hidden = !realRace;
+  $('botRow').hidden = mode !== 'bot';
+  $('drillRow').hidden = mode !== 'drill';
+  $('customRow').hidden = mode !== 'custom';
+}
+
+$('resetStats').addEventListener('click', () => {
+  if (confirm('Clear your local race history?')) { resetStats(); renderStatsPanel(); }
+});
+
 $('loadStats').addEventListener('click', async () => {
   const user = $('userInput').value.trim();
   const line = hud.els.statsLine;
@@ -156,25 +202,54 @@ window.addEventListener('keydown', (e) => {
 async function startRaceFlow() {
   if (phase === 'countdown' || phase === 'racing' || phase === 'loading') return;
   phase = 'loading';
-  hud.setStartBusy(true, '⏳ fetching a real race…');
-  hud.menuBadge('connecting to play.typeracer.com…');
+  hud.setStartBusy(true);
 
   const mode = $('gameMode').value;
-  const solo = mode === 'single' || mode === 'practice';
-  $('difficulty').disabled = solo; // no bots — opponent pace is meaningless
+  const solo = SOLO_MODES.includes(mode);
+  $('difficulty').disabled = solo || mode === 'bot';
+  hud.setStartBusy(true, mode === 'bot' ? '⏳ spinning up bots…'
+    : mode === 'drill' || mode === 'custom' ? '⏳ preparing the track…'
+    : '⏳ fetching a real race…');
+  hud.menuBadge('connecting…');
+
   let raceData;
   const challengeAttempt = CHALLENGE.raceId;
   try {
     if (mode === 'practice') {
       hud.menuBadge('🧘 loading a Monkeytype quote…');
       raceData = await API.practice(lastPracticeId);
+    } else if (mode === 'drill') {
+      hud.menuBadge(`🎯 ${$('drillType').value} drill — generating…`);
+      raceData = drillRace($('drillType').value);
+    } else if (mode === 'custom') {
+      const raw = ($('customText').value || '').replace(/\s+/g, ' ').trim();
+      if (raw.length < 20) {
+        hud.menuBadge('✗ write at least 20 characters of text first (custom mode)', true);
+        hud.setStartBusy(false);
+        phase = 'menu';
+        return;
+      }
+      raceData = { id: 'custom', custom: true, live: false, text: raw.slice(0, 600), source: 'your own text', note: 'custom text practice', racers: [] };
+    } else if (mode === 'bot') {
+      hud.menuBadge('🤖 spinning up the bots…');
+      const d = demoRace(lastRaceId); // bundled quote as the battlefield
+      const n = Math.max(1, Math.min(4, parseInt($('botCount').value, 10) || 2));
+      const target = Math.max(20, Math.min(200, parseFloat($('botWpm').value) || 70));
+      const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+      raceData = {
+        ...d, bot: true,
+        racers: Array.from({ length: n }, (_, i) => ({
+          name: names[i % names.length], wpm: target,
+          acc: 92 + Math.floor(Math.random() * 6),
+        })),
+      };
     } else if (challengeAttempt) {
       hud.menuBadge('⚔️ loading the challenged race…');
       raceData = await API.race({ id: challengeAttempt }); // throws if it no longer exists
     } else {
       raceData = await API.race(lastRaceId);
     }
-    CHALLENGE.raceId = null; // one-shot — "race again" picks a fresh race
+    if (REAL_DATA_MODES.includes(mode)) CHALLENGE.raceId = null; // one-shot — "race again" picks a fresh race
   } catch (e) {
     if (challengeAttempt) {
       // the shared race is gone from TypeRacer — degrade gracefully
@@ -190,12 +265,12 @@ async function startRaceFlow() {
   }
   lastRaceId = raceData.id;
   if (mode === 'practice') lastPracticeId = raceData.id;
-  if (solo) raceData = { ...raceData, racers: [], solo: true }; // solo — nobody else on the grid
-  if (raceData.demo) {
+  if (solo) raceData = { ...raceData, racers: [], solo: true, kind: mode }; // solo — nobody else on the grid
+  if (raceData.demo && mode !== 'bot') {
     hud.menuBadge('🧪 demo race — start the local server (node server.js) to race real TypeRacer data');
   }
 
-  const difficulty = $('difficulty').value;
+  const difficulty = mode === 'bot' ? 'real' : $('difficulty').value; // bots run at YOUR configured pace
   const myName = stats ? stats.user : null;
   const myWpm = stats ? (stats.avgWpm || 70) : null;
 
@@ -294,6 +369,8 @@ let lastResults = null;
 const origOnResults = hud.onResults.bind(hud);
 hud.onResults = (results) => {
   origOnResults(results);
+  recordRace(results); // local stats — every run counts, even a death run
+  renderStatsPanel();
   lastResults = results;
   phase = 'finished';
   hud.showMirror(false);
@@ -325,12 +402,18 @@ $('shareBtn').addEventListener('click', async () => {
   url.search = '';
   const q = new URLSearchParams();
   const shareMode = $('gameMode').value;
-  if (lastResults.raceId && shareMode !== 'practice') q.set('race', lastResults.raceId);
+  if (lastResults.raceId && SHAREABLE_RACE_MODES.includes(shareMode)) q.set('race', lastResults.raceId);
   if (shareMode !== 'classic') q.set('mode', shareMode);
+  if (shareMode === 'bot') { // friends replay the same bot setup
+    q.set('bots', $('botCount').value);
+    q.set('bwpm', $('botWpm').value);
+  }
+  if (shareMode === 'drill') q.set('drill', $('drillType').value);
+  if (shareMode === 'custom') q.set('text', $('customText').value.trim().slice(0, 600));
   q.set('theme', currentThemeId);
   q.set('tod', settings.timeOfDay);
   const diff = $('difficulty').value;
-  if (diff !== 'normal') q.set('diff', diff);
+  if (diff !== 'normal' && REAL_DATA_MODES.includes(shareMode)) q.set('diff', diff);
   url.search = q.toString();
 
   const place = ORD[me.place - 1] ?? `${me.place}th`;
@@ -389,6 +472,7 @@ function loop(t) {
 
 applySettingsToUI();
 buildThemeCards();
+renderStatsPanel();
 requestAnimationFrame(loop);
 
 /* debug/test handle (also handy in devtools) */
@@ -413,10 +497,16 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   });
 }
 
-/* challenge links carry the mode — preselect it before the user hits start */
-if (['single', 'practice', 'death'].includes(urlParams.get('mode'))) {
-  $('gameMode').value = urlParams.get('mode');
-}
+/* challenge links carry the mode (+ its params) — preselect before START.
+ * Otherwise restore the mode the player left off on. */
+const pm = urlParams.get('mode');
+if (pm && MODES[pm]) setMode(pm);
+else if (settings.mode && MODES[settings.mode]) setMode(settings.mode);
+else { buildModeCards(); syncModeRows(); }
+if (urlParams.get('bots')) $('botCount').value = String(Math.max(1, Math.min(4, parseInt(urlParams.get('bots'), 10) || 2)));
+if (urlParams.get('bwpm')) $('botWpm').value = String(Math.max(20, Math.min(200, parseFloat(urlParams.get('bwpm')) || 70)));
+if (['words', 'numbers', 'code'].includes(urlParams.get('drill'))) $('drillType').value = urlParams.get('drill');
+if (urlParams.get('text')) $('customText').value = urlParams.get('text').slice(0, 600);
 
 /* menu badge: autoshot harness > challenge link > touch device > default hint */
 if (urlParams.get('autoshot')) {

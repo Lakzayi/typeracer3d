@@ -112,17 +112,50 @@
 
       <section class="setup glass">
         <div class="setupGrid">
-          <div class="setupRow">
-            <label>Game mode</label>
-            <select id="gameMode">
-              <option value="classic" selected>🏁 Classic — race real TypeRacer racers</option>
-              <option value="single">🕹️ Single — solo time trial</option>
-              <option value="practice">🧘 Practice — Monkeytype quotes, no pressure</option>
-              <option value="death">💀 Death — one mistake and you're out</option>
+          <div class="setupRow setupRowWide">
+            <label>Game mode <span class="opt">7 ways to race</span></label>
+            <div id="modeCards" class="modeGrid"></div>
+            <!-- logic source of truth — the cards above drive this select -->
+            <select id="gameMode" style="display:none">
+              <option value="classic" selected>🏁 Classic</option>
+              <option value="single">🕹️ Single</option>
+              <option value="practice">🧘 Practice</option>
+              <option value="death">💀 Death</option>
+              <option value="bot">🤖 Bot battle</option>
+              <option value="drill">🎯 Drill</option>
+              <option value="custom">📝 Custom text</option>
             </select>
           </div>
 
-          <div class="setupRow">
+          <div class="setupRow" id="botRow" hidden>
+            <label>Battle setup <span class="opt">how many bots · how fast</span></label>
+            <div class="botCfg">
+              <select id="botCount">
+                <option value="1">1 bot</option>
+                <option value="2" selected>2 bots</option>
+                <option value="3">3 bots</option>
+                <option value="4">4 bots</option>
+              </select>
+              <input id="botWpm" type="number" min="20" max="200" step="5" value="70" inputmode="numeric" aria-label="bot wpm"/>
+              <span class="unit">wpm</span>
+            </div>
+          </div>
+
+          <div class="setupRow" id="drillRow" hidden>
+            <label>Drill type <span class="opt">solo aim trainer</span></label>
+            <select id="drillType">
+              <option value="words" selected>🔤 Common words — muscle memory for prose</option>
+              <option value="numbers">🔢 Numbers &amp; symbols — digits, dates, money</option>
+              <option value="code">💻 Code — real JavaScript snippets</option>
+            </select>
+          </div>
+
+          <div class="setupRow" id="customRow" hidden>
+            <label>Your text <span class="opt">20–600 characters</span></label>
+            <textarea id="customText" rows="3" placeholder="paste anything — lyrics, homework, docs…"></textarea>
+          </div>
+
+          <div class="setupRow" id="usernameRow">
             <label>Your TypeRacer username <span class="opt">optional — race as yourself</span></label>
             <div class="userRow">
               <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
@@ -131,7 +164,7 @@
             <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
           </div>
 
-          <div class="setupRow">
+          <div class="setupRow" id="difficultyRow">
             <label>Opponent pace</label>
             <select id="difficulty">
               <option value="chill">😴 Chill · ~45 WPM</option>
@@ -164,6 +197,39 @@
         <div id="menuBadge" class="menuBadge"></div>
         <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
       </section>
+
+      <!-- your local stats — recorded after every run, kept on this device -->
+      <section id="personalStats" class="glass statsPanel">
+        <div class="sectionHead">
+          <h2>📊 your stats</h2>
+          <button id="resetStats" title="clear the history stored on this device">reset</button>
+        </div>
+        <div id="statsCards" class="statsCards"></div>
+        <div id="recentRuns" class="recentRuns"></div>
+      </section>
+
+      <details class="help glass">
+        <summary>❓ how to play, modes &amp; tips</summary>
+        <div class="helpBody">
+          <h3>controls</h3>
+          <p><kbd>A–Z</kbd> type the quote to drive · <kbd>backspace</kbd> fixes mistakes (realistic mode) ·
+            <kbd>esc</kbd> leaves the race · <kbd>N</kbd> cycles day / sunset / night ·
+            after alt-tab, click anywhere to resume.</p>
+          <h3>the 7 modes</h3>
+          <ul>
+            <li>🏁 <b>classic</b> — replay a real TypeRacer race: real quote, real opponents, bots that replay their exact keystroke timing.</li>
+            <li>🕹️ <b>single</b> — a real race quote, solo time trial. Nobody else on track.</li>
+            <li>🧘 <b>practice</b> — random quote from Monkeytype's public dump (cached a week — light on data). No stakes.</li>
+            <li>💀 <b>death</b> — classic race, but your <b>first</b> mistake ends the run. How far can you get?</li>
+            <li>🤖 <b>bot battle</b> — choose the number of bots and their exact WPM, then beat them on a bundled quote.</li>
+            <li>🎯 <b>drill</b> — aim trainers: common words, numbers &amp; symbols, or JavaScript code. Solo, works offline.</li>
+            <li>📝 <b>custom</b> — paste any text (lyrics, homework, docs) and race through it.</li>
+          </ul>
+          <h3>tips</h3>
+          <p>Accuracy beats raw speed — every mistake costs a backspace trip. Chain 10+ correct keys for a 🔥 combo.
+            In <b>death</b> mode, typing at ~90% of your top speed survives much longer than full send.</p>
+        </div>
+      </details>
     </div>
   </div>
 

@@ -14,7 +14,7 @@ const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './favicon.svg',
   './vendor/three.module.js', './fonts/inter-var.woff2',
   './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js',
-  './js/hud.js', './js/sound.js', './js/demo-data.js',
+  './js/hud.js', './js/sound.js', './js/demo-data.js', './js/modes.js', './js/drills.js', './js/stats.js',
   './js/themes/index.js', './js/themes/shared.js',
   './js/themes/car.js', './js/themes/boat.js', './js/themes/horse.js', './js/themes/rocket.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png',

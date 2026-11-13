@@ -4,6 +4,7 @@
  * timing — computes live standings and final results. */
 
 import { mulberry32 } from './world.js';
+import { SOLO_MODES } from './modes.js';
 
 const TARGETS = { chill: 45, normal: 70, hard: 95 };
 const MAX_BOTS = 4;
@@ -23,7 +24,7 @@ export class RaceController {
     this.typing = typing;
     this.mode = mode;
     this.deadly = mode === 'death';   // one mistake ends the run
-    this.solo = mode === 'single' || mode === 'practice'; // no opponents on track
+    this.solo = SOLO_MODES.includes(mode); // no opponents on track
     this.died = false;
     this.textLen = race.text.length;
     this.phase = 'ready'; // ready -> racing -> finished

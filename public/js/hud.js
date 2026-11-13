@@ -56,6 +56,17 @@ export class HUD {
     if (race.practice) {
       el.classList.remove('orange');
       el.innerHTML = `🧘 <b>practice</b> · ${race.source || 'Monkeytype'} · no opponents, no stakes`;
+    } else if (race.drill) {
+      el.classList.remove('orange');
+      el.innerHTML = `🎯 <b>drill</b> · ${race.source || 'aim trainer'} · solo, works offline`;
+    } else if (race.custom) {
+      el.classList.remove('orange');
+      el.innerHTML = `📝 <b>custom text</b> · your own words · solo run`;
+    } else if (race.bot) {
+      const wpms = race.racers.map((r) => r.wpm || 60).sort((a, b) => a - b);
+      const mid = wpms[Math.floor(wpms.length / 2)] || 70;
+      el.classList.remove('orange');
+      el.innerHTML = `🤖 <b>bot battle</b> · ${race.racers.length} bot${race.racers.length > 1 ? 's' : ''} @ ~${Math.round(mid)} wpm · your pace, your fight`;
     } else if (race.solo) {
       el.classList.remove('orange');
       el.innerHTML = `🕹️ <b>single</b> · time trial · quote from a real TypeRacer race${race.id ? ` ${race.id}` : ''} — no opponents`;
@@ -231,6 +242,12 @@ export class HUD {
       head = `💀 died at ${Math.round(results.died.progress01 * 100)}%<small>death mode — one mistake ends the run</small>`;
     } else if (results.mode === 'practice') {
       head = `🧘 practice complete<small>${results.raceId && results.raceId.startsWith('mt-') ? 'quote from Monkeytype' : 'bundled quote (offline)'} — no stakes</small>`;
+    } else if (results.mode === 'drill') {
+      const t = results.raceId && results.raceId.startsWith('drill-numbers') ? 'numbers & symbols'
+        : results.raceId && results.raceId.startsWith('drill-code') ? 'code' : 'common words';
+      head = `🎯 drill complete<small>${t} — solo practice, no stakes</small>`;
+    } else if (results.mode === 'custom') {
+      head = `📝 custom run complete<small>your own text — solo practice</small>`;
     } else if (results.mode === 'single') {
       head = `🏁 solo run complete<small>time trial — you were the only one on track</small>`;
     } else {
@@ -249,11 +266,13 @@ export class HUD {
         <span class="rwm">${Math.round(r.wpm)} wpm</span>
         <span class="rac">${r.acc.toFixed(1)}%</span>
       </div>`).join('') +
-      (results.mode === 'single' || results.mode === 'practice'
+      (['single', 'practice', 'drill', 'custom'].includes(results.mode)
         ? ''
-        : (results.factor && Math.abs(results.factor - 1) > 0.03
-          ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
-          : `<div class="real">bots ran at the real race speeds</div>`));
+        : results.mode === 'bot'
+          ? `<div class="real">synthetic bots — at the pace you configured</div>`
+          : (results.factor && Math.abs(results.factor - 1) > 0.03
+            ? `<div class="real">bot speeds scaled ×${results.factor.toFixed(2)} from the real race (difficulty)</div>`
+            : `<div class="real">bots ran at the real race speeds</div>`));
     this.showResults();
   }
 
