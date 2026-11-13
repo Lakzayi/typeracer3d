@@ -119,6 +119,7 @@ $('againBtn').addEventListener('click', () => { hud.els.results.classList.add('h
 $('menuBtn').addEventListener('click', () => backToMenu());
 
 function backToMenu() {
+  if (swUpdatePending) { location.reload(); return; } // mid-race update: apply now that we're idle
   if (race) { race.dispose(); race = null; }
   if (sound) sound.stopEngine();
   if (typing) { typing.disable(); }
@@ -386,9 +387,19 @@ window.__tr3d = {
   setPaused, startRaceFlow, backToMenu,
 };
 
-/* installable / offline (PWA) — https or localhost only */
+/* installable / offline (PWA) — https or localhost only. The SW revalidates
+ * assets after every deploy and messages us when bytes changed; we reload once,
+ * on our own terms (immediately on the menu, after the race otherwise) so a
+ * fresh build appears without any hard refresh. */
+let swUpdatePending = false;
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {}));
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data !== 'TR3D_UPDATED') return;
+    swUpdatePending = true;
+    if (phase === 'menu') location.reload();
+    else hud.toast('🔄 new version ready — applies when you return to the menu', 3200);
+  });
 }
 
 /* menu badge: autoshot harness > challenge link > touch device > default hint */

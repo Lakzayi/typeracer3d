@@ -1,6 +1,14 @@
-/* TypeRacer 3D service worker — makes the installed app work offline.
- * Static assets: stale-while-revalidate. /api/* always hits the network
- * (real TypeRacer data must never be served stale). */
+/* TypeRacer 3D service worker — offline support + fresh-after-deploy.
+ *
+ * - navigations (HTML): network-first — the page shell is ~12 KB, so every
+ *   visit checks the server and a deploy is seen immediately
+ * - other static assets: stale-while-revalidate — served instantly from the
+ *   cache, then revalidated with cache:'no-cache' in the background. With the
+ *   server's ETags an unchanged file costs a ~300 B 304; only genuinely
+ *   changed files come back with a body. When bytes actually changed the page
+ *   gets a TR3D_UPDATED message and reloads itself when idle (no hard refresh).
+ * - /api/* always hits the network (real TypeRacer data must never be stale).
+ */
 const CACHE = 'tr3d-v1';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './favicon.svg',
@@ -26,17 +34,62 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+/* revalidate one asset; notify pages when the bytes actually changed */
+function revalidate(request, cache) {
+  return fetch(request, { cache: 'no-cache' })
+    .then(async (res) => {
+      if (!res || !res.ok) return; // offline / 304-without-body: keep what we have
+      const old = await cache.match(request);
+      const changed = !old ||
+        (await old.clone().arrayBuffer()).byteLength !== (await res.clone().arrayBuffer()).byteLength;
+      await cache.put(request, res);
+      if (changed) {
+        const clients = await self.clients.matchAll({ includeUncontrolled: true });
+        clients.forEach((c) => c.postMessage('TR3D_UPDATED'));
+      }
+    })
+    .catch(() => {}); // offline: cached copy stays authoritative
+}
+
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET') return;
-  if (url.origin === location.origin && url.pathname.startsWith('/api/')) return; // live data only
+  if (url.origin !== location.origin) return; // cross-origin: browser handles it
+  if (url.pathname.startsWith('/api/')) return; // live data only, never cached
 
+  // page shell — always fresh from the network, cached copy for offline
+  if (e.request.mode === 'navigate') {
+    e.respondWith((async () => {
+      try {
+        const res = await fetch(e.request, { cache: 'no-cache' });
+        if (res && res.ok) {
+          const cache = await caches.open(CACHE);
+          cache.put('./index.html', res.clone());
+        }
+        return res;
+      } catch (err) {
+        const cache = await caches.open(CACHE);
+        return (await cache.match('./index.html')) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // static assets — instant from cache, quietly refreshed in the background
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(e.request);
-    const refresh = fetch(e.request)
-      .then((res) => { if (res && res.ok) cache.put(e.request, res.clone()); return res; })
-      .catch(() => null);
-    return cached || (await refresh) || cache.match('./index.html');
+    if (cached) {
+      e.waitUntil(revalidate(e.request, cache));
+      return cached;
+    }
+    // first sighting: go to the network, then keep it
+    try {
+      const res = await fetch(e.request, { cache: 'no-cache' });
+      if (res && res.ok) await cache.put(e.request, res.clone());
+      return res || Response.error();
+    } catch (err) {
+      return Response.error();
+    }
   })());
 });

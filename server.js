@@ -392,14 +392,23 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { ok: true, path: path.basename(out), bytes: body.length });
     }
 
-    // static files
+    // static files — ETag + 304 so the service worker's no-cache revalidation
+    // costs ~300 B per unchanged file instead of a full re-download
     let p = url.pathname === '/' ? '/index.html' : url.pathname;
     p = path.normalize(p).replace(/^(\.\.[/\\])+/, '');
     const file = path.join(PUBLIC_DIR, p);
     if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end(); }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('404'); }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
+      const stat = fs.statSync(file);
+      const etag = `W/"${stat.size.toString(36)}-${Math.round(stat.mtimeMs).toString(36)}"`;
+      const headers = {
+        'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+        'Cache-Control': 'no-cache', // always revalidate; the ETag makes that cheap
+        ETag: etag,
+      };
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+      res.writeHead(200, headers);
       res.end(data);
     });
   } catch (e) {
