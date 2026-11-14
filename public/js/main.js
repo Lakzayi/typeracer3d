@@ -1028,7 +1028,9 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data !== 'TR3D_UPDATED') return;
     swUpdatePending = true;
-    if (phase === 'menu') location.reload();
+    // an open multiplayer lobby IS an active room — a reload here would kill
+    // it for everyone trying to join ("room not found"). Defer like a race.
+    if (phase === 'menu' && !mpConnected()) location.reload();
     else hud.toast('🔄 new version ready — applies when you return to the menu', 3200);
   });
 }

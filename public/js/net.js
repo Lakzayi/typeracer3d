@@ -185,6 +185,30 @@ export async function createRoom(name) {
 
 /* ---------- client side ---------- */
 
+/* connect with typed failures. A real 'peer-unavailable' means the room is
+ * genuinely absent (host left the lobby / wrong code); a silent timeout is
+ * usually transient signaling — worth exactly one retry before giving up. */
+function connectToHost(peer, roomCode) {
+  const ROOM_MSG = 'room not found — the host may have left the lobby. Ask for a fresh invite link';
+  const attempt = () => new Promise((resolve, reject) => {
+    const conn = peer.connect(ID_PREFIX + roomCode, { reliable: true });
+    let settled = false;
+    const fail = setTimeout(() => { if (!settled) { settled = true; reject({ type: 'timeout' }); } }, 7000);
+    peer.on('error', (err) => {
+      if (settled || err.type !== 'peer-unavailable') return;
+      settled = true; clearTimeout(fail); reject({ type: 'peer-unavailable' });
+    });
+    conn.on('open', () => { if (!settled) { settled = true; clearTimeout(fail); resolve(conn); } });
+  });
+  return attempt().catch((e) => {
+    if (e.type === 'peer-unavailable') throw new Error(ROOM_MSG);
+    return attempt().catch((e2) => {
+      if (e2.type === 'peer-unavailable') throw new Error(ROOM_MSG);
+      throw new Error("couldn't reach the room — check your connection; the host's lobby may have closed");
+    });
+  });
+}
+
 export async function joinRoom(roomCode, name) {
   await teardown();
   isHost = false;
@@ -193,11 +217,7 @@ export async function joinRoom(roomCode, name) {
   peer = await newPeer(null, peerServerCfg()); // random peer id from the server
   selfId = peer.id;
   code = roomCode;
-  myConn = peer.connect(ID_PREFIX + roomCode, { reliable: true });
-  await new Promise((resolve, reject) => {
-    const fail = setTimeout(() => reject(new Error('room not found — check the code')), 9000);
-    myConn.on('open', () => { clearTimeout(fail); resolve(); });
-  });
+  myConn = await connectToHost(peer, roomCode);
   myConn.on('data', (msg) => {
     stats.recv++;
     stats.lastRecvAt = Date.now();
