@@ -3,7 +3,7 @@
  * Settings (typing mode, time of day, sound) persist in localStorage. */
 
 import { API } from './api.js';
-import { World, hashSeed } from './world.js';
+import { World, hashSeed, setTrackLength, BASE_TRACK } from './world.js';
 import { THEMES } from './themes/index.js';
 import { TypingEngine } from './typing.js';
 import { RaceController } from './race.js';
@@ -386,6 +386,8 @@ function backToMenu() {
   phase = 'menu';
   world && (world.finishMode = false);
   world && (world.mirrorEnabled = false);
+  world && setTrackLength(BASE_TRACK); // menu idle theme rebuilds at the standard road
+  world && (world.combo01 = 0);
   hud.showMenu();
   hud.setStartBusy(false);
   hud.centerMsg('');
@@ -539,6 +541,11 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
   if (!world) world = new World($('scene'));
   world.finishMode = false;
   world.focusIdx = 0;
+  // the road scales with the text: perceived speed then tracks wpm only —
+  // a 600-char custom run is a LONGER road, not a slow crawl (same wpm =
+  // same world-units/second). REF = 200 chars → base 900 units; clamps keep
+  // tiny drills from feeling cramped and 600-char customs from being absurd.
+  setTrackLength(Math.round(Math.max(420, Math.min(2900, BASE_TRACK * (raceData.text || '').length / 200))));
 
   const racers = [{ name: 'YOU', isPlayer: true, paint: playerPaint(currentThemeId) }];
   // opponents in race order (same order the controller derives) — each rolls a
@@ -569,6 +576,7 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
     onError: () => { sound.error(); hud.errorFlash(); race && race.notifyError(); hud.updateCombo(typing.combo); },
     onMilestone: (n) => {
       sound.finish(); // little fanfare
+      world.pulse(0.7); // FOV kick + streak burst — progress feels like speed
       hud.toast(`🔥 ${n} combo — on fire!`, 1600);
     },
     onFinish: () => { hud.updateCombo(0); },
@@ -1007,10 +1015,11 @@ function loop(t) {
         typing.finishedAt ? typing.elapsedSec() : null, typing.accuracy());
     }
     world.speed01 = race.state[0].speed01;
+    world.combo01 = Math.min(1, (typing?.combo ?? 0) / 45); // 45-combo = full glow
     sound.engineSpeed(world.smoothSpeed01);
     world.update(dt, race.state);
     hud.drawMinimap(race.state);
-    hud.setSpeedGlow(world.smoothSpeed01 * 0.75);
+    hud.setSpeedGlow(Math.min(1, world.smoothSpeed01 * 0.75 + world.comboGlow * 0.3));
     if (phase === 'racing') {
       hud.updateBoard(race.state);
       hud.updateStats(race.state, typing, race.playerRank(), race.state.length);

@@ -4,7 +4,14 @@
 
 import * as THREE from 'three';
 
-export const TRACK_LENGTH = 900;
+/* track length in world units — MUTABLE per race: the road scales with the
+ * text length so on-screen speed tracks wpm only (a 600-char custom run is a
+ * longer road, not a slow crawl). ESM live bindings mean every theme reading
+ * TRACK_LENGTH — at build time or per frame — sees the current value;
+ * setTrackLength() runs BEFORE the theme is created in launchRace. */
+export const BASE_TRACK = 900;
+export let TRACK_LENGTH = BASE_TRACK;
+export function setTrackLength(n) { TRACK_LENGTH = n; }
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -26,10 +33,16 @@ const expK = (k, dt) => 1 - Math.exp(-k * dt); // framerate-independent smoothin
 
 export class World {
   constructor(canvas) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      canvas, antialias: true,
+      powerPreference: 'high-performance', // hint the compositor: this tab is a game
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // shadow maps redraw at half rate (see render) — moving-car shadows at
+    // 30 Hz are indistinguishable here and the pass is one of the costliest
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // ACES filmic + per-TOD exposure: highlights keep their color instead of
     // clipping to white, and night stays night by dropping exposure, not by
@@ -85,6 +98,9 @@ export class World {
     this.focusIdx = 0;
     this.speed01 = 0;          // raw target speed
     this.smoothSpeed01 = 0;    // eased, drives FOV/vignette/streaks/sound
+    this.combo01 = 0;          // target combo glow (main.js feeds typing.combo)
+    this.comboGlow = 0;        // eased — combo speed-feel (FOV/streaks/vignette)
+    this._pulse = 0;           // decaying kick for milestones (pulse())
     this.shakeT = 0;
     this.camPos = new THREE.Vector3(0, 5, 12);
     this.camLook = new THREE.Vector3(0, 1, -10);
@@ -135,6 +151,10 @@ export class World {
   }
 
   shake(power = 1) { this.shakeT = Math.min(0.45, 0.22 * power); }
+
+  /* milestone kick — combo milestones (25/50/100…) call this; it briefly
+   * widens the FOV and pushes the streaks so progress FEELS like acceleration */
+  pulse(power = 0.6) { this._pulse = Math.max(this._pulse, power); }
 
   /* additive API for the themes' setTimeOfDay (GRAPHICS_PLAN §1.1, §1.4) */
   setExposure(v) { this.renderer.toneMappingExposure = v; }
@@ -302,13 +322,19 @@ export class World {
     // eased speed for all visual reactions (FOV, streaks, vignette, sound)
     this.smoothSpeed01 += (this.speed01 - this.smoothSpeed01) * expK(3.2, dt);
     const s01 = this.smoothSpeed01;
+    // combo glow eases in/out — sustained hot streaks add speed feel
+    this.comboGlow += ((this.combo01 ?? 0) - this.comboGlow) * expK(2.8, dt);
+    const glow = this.comboGlow;
+    this._pulse *= Math.exp(-2.4 * dt);
+    if (this._pulse < 0.01) this._pulse = 0;
+    const boost = glow * 0.4 + this._pulse * 0.6;
 
-    // streak particles
+    // streak particles — denser and faster while a combo runs hot
     const sMat = this._streaks.material;
-    sMat.opacity += ((s01 > 0.4 ? (s01 - 0.4) * 1.5 : 0) - sMat.opacity) * expK(4, dt);
+    sMat.opacity += (Math.min(0.9, (s01 > 0.4 ? (s01 - 0.4) * 1.5 : 0) + glow * 0.45 + this._pulse * 0.5) - sMat.opacity) * expK(4, dt);
     if (sMat.opacity > 0.01) {
       const arr = this._streaks.geometry.attributes.position.array;
-      const dz = (30 + s01 * 160) * dt;
+      const dz = (30 + s01 * 160) * (1 + boost) * dt;
       for (let i = 0; i < arr.length / 3; i++) {
         arr[i * 3 + 2] += dz;
         if (arr[i * 3 + 2] > 12) {
@@ -376,14 +402,15 @@ export class World {
       this.camPos.lerp(this._v1, expK(2.4, dt));
       this.camLook.lerp(this._v2, expK(3.5, dt));
     } else {
+      // chase cams ease a touch tighter at speed — snappier follow = faster feel
       this._v1.set(
         carPos.x * 0.86,
         4.25 + s01 * 0.55,
         carPos.z + 10.4 - s01 * 1.9
       );
-      this.camPos.lerp(this._v1, expK(5.5, dt));
+      this.camPos.lerp(this._v1, expK(5.5 + s01 * 1.4, dt));
       this._v2.set(carPos.x * 0.92, 1.2, carPos.z - 17);
-      this.camLook.lerp(this._v2, expK(7.5, dt));
+      this.camLook.lerp(this._v2, expK(7.5 + s01 * 1.5, dt));
     }
 
     const p = this.camPos, l = this.camLook;
@@ -396,7 +423,7 @@ export class World {
     }
     this.camera.lookAt(l);
 
-    const targetFov = 62 + s01 * 13;
+    const targetFov = 62 + s01 * 13 + glow * 6 + this._pulse * 7;
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov += (targetFov - this.camera.fov) * expK(3, dt);
       this.camera.updateProjectionMatrix();
@@ -417,6 +444,11 @@ export class World {
   }
 
   render() {
+    this._frame = (this._frame || 0) + 1;
+    const even = this._frame % 2 === 0;
+    // shadow maps at half rate (constructor disabled autoUpdate) — the sun
+    // frustum follows the car, so 30 Hz shadows read identically here
+    if (even) this.renderer.shadowMap.needsUpdate = true;
     const r = this.renderer;
     r.render(this.scene, this.camera);
     // draw-call budget probe (SPEC §1.3: "measured, not promised") — samples
@@ -427,8 +459,10 @@ export class World {
     const _mainCalls = this._probeDC ? r.info.render.calls : 0;
     const _mainTris = this._probeDC ? r.info.render.triangles : 0;
 
-    // rearview mirror pass
-    if (this.mirrorEnabled && this.theme?.vehicles?.[this.focusIdx]) {
+    // rearview mirror pass — every OTHER frame: the scene renders twice
+    // otherwise and the mirror content at 30 Hz is indistinguishable while
+    // it costs half as much (biggest single render win we have)
+    if (this.mirrorEnabled && even && this.theme?.vehicles?.[this.focusIdx]) {
       const w = r.domElement.clientWidth, h = r.domElement.clientHeight;
       const mw = Math.min(372, w * 0.42), mh = 94;
       const mx = (w - mw) / 2, my = 58;
