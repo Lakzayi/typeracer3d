@@ -377,6 +377,7 @@ async function startRaceFlow() {
   hud.setDataBadge(raceData);
   hud.buildBoard(racers, colors, lanes);
   hud.setPaused(false);
+  hud.setCaps(false); // stale state from a previous run must not linger
   hud.showMirror(true);
   world.mirrorEnabled = true;
   sound.startEngine(currentThemeId); // propulsion sound of the chosen theme
@@ -419,6 +420,14 @@ function setPaused(p) {
 $('pauseOverlay').addEventListener('click', () => setPaused(false));
 window.addEventListener('blur', () => { if (phase === 'racing') setPaused(true); });
 hud.els.typingPanel.addEventListener('click', () => typing && typing.focus());
+
+/* caps lock watchdog — with caps on, every letter mismatches and the run dies
+ * (death mode) or drowns in backspaces; surface it loudly on every keystroke */
+for (const evt of ['keydown', 'keyup']) {
+  $('typeInput').addEventListener(evt, (e) => {
+    if (e.getModifierState) hud.setCaps(e.getModifierState('CapsLock'));
+  });
+}
 
 /* ---------------- results + personal best ---------------- */
 

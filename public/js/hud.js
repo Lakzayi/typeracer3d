@@ -21,6 +21,7 @@ export class HUD {
       rankBig: $('rankBig'), rankOf: $('rankOf'), wpmVal: $('wpmVal'), accVal: $('accVal'),
       board: $('board'), dataBadge: $('dataBadge'), centerMsg: $('centerMsg'),
       typingPanel: $('typingPanel'), typingText: $('typingText'),
+      capsBadge: $('capsBadge'),
       pauseOverlay: $('pauseOverlay'), soundBtn: $('soundBtn'),
       themeCards: $('themeCards'), statsLine: $('statsLine'), menuBadge: $('menuBadge'),
       resPlace: $('resPlace'), resStats: $('resStats'), resBoard: $('resBoard'),
@@ -235,6 +236,9 @@ export class HUD {
   }
 
   setPaused(show) { this.els.pauseOverlay.classList.toggle('hidden', !show); }
+
+  /* caps lock warning — lives above the typing panel, only visible while on */
+  setCaps(on) { this.els.capsBadge.classList.toggle('hidden', !on); }
 
   /* ---------- results ---------- */
   onResults(results) {
