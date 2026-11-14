@@ -780,6 +780,7 @@ $('shareCardBtn').addEventListener('click', async () => {
 
 let mpOpen = false;
 let mpBusy = false;
+let mpAcked = false; // client: the host's roster broadcast confirmed our hello
 
 const escHtml = (s) => s.replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -829,6 +830,16 @@ function showMpWait() {
   }
   renderMpPlayers();
   setMpStatus('');
+  if (!host) {
+    // "you are in" must be honest: it only counts once the host's roster
+    // broadcast confirms our hello actually landed. Until then, say so.
+    mpAcked = false;
+    setMpStatus('waiting for the host to confirm the connection…');
+    setTimeout(() => {
+      if (mpOpen && !mpHost() && !mpAcked)
+        setMpStatus('⚠ never confirmed by the host — it may be offline, or your network blocks the connection; leave and try again', true);
+    }, 12000);
+  }
 }
 
 function openMpLobby(autoCode = null) {
@@ -923,7 +934,14 @@ setSelfProvider(() => race && race.mode === 'mp' && typing ? {
 
 /* net events */
 mpOn('room', () => showMpWait());
-mpOn('players', () => { if (mpOpen) renderMpPlayers(); });
+mpOn('players', () => {
+  if (!mpOpen) return;
+  renderMpPlayers();
+  if (!mpHost() && !mpAcked) {
+    mpAcked = true;
+    setMpStatus('✓ connected — waiting for the host to start');
+  }
+});
 mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
 mpOn('start', (msg) => mpLaunch(msg));
 mpOn('snap', (rows) => { if (race?.mode === 'mp' && race.phase === 'racing') race.applyRemote(rows); });
