@@ -689,6 +689,15 @@ body {
 .mpStatus { margin-top: 10px; text-align: center; font-size: 11.5px; color: var(--dim); min-height: 15px; }
 .mpStatus.err { color: #ff6b81; }
 
+/* ── RTL languages (Persian, Arabic) — typing flows right-to-left ── */
+body.lang-rtl #typingText,
+body.lang-rtl #typeInput {
+  direction: rtl;
+  text-align: right;
+  font-family: Vazirmatn, 'Segoe UI', Tahoma, 'Noto Naskh Arabic', sans-serif;
+}
+body.lang-rtl #typingText { line-height: 2; }
+
 /* ── daily challenge banner ── */
 .dailyBanner {
   display: flex; align-items: center; gap: 14px; width: 100%;

@@ -5,6 +5,7 @@
 import { monkeytypeQuotes } from './api.js';
 import { demoRace, synthLog } from './demo-data.js';
 import { mulberry32 } from './world.js';
+import { getLanguage, pickPoolText } from './languages.js';
 
 const KEY = 'tr3d_daily_v1';
 
@@ -25,10 +26,30 @@ function seedFrom(str) {
   return h >>> 0;
 }
 
-/* build today's deterministic race. Falls back to the bundled demo pool when
+/* build today's deterministic race — same text, same bots for everyone who
+ * picked the same language. Falls back to the bundled demo pool when
  * Monkeytype is unreachable — still deterministic for the day on this device. */
-export async function dailyRace() {
+export async function dailyRace(language = 'en') {
   const date = todayStr();
+  // non-English: a seeded pick from that language's bundled pool — everyone
+  // racing the same language gets the exact same text and bot field
+  if (language !== 'en') {
+    const lang = getLanguage(language);
+    const rng = mulberry32(seedFrom('tr3d-' + date + '-' + language));
+    const pick = pickPoolText(language, 'tr3d-' + date + '-' + language);
+    const names = ['Sable', 'Misty', 'Drift', 'Kilo', 'Ember', 'Flint'];
+    const pool = [...names].sort(() => rng() - 0.5);
+    const racers = pool.slice(0, 3).map((name) => {
+      const wpm = Math.round(52 + rng() * 42);
+      return { name, wpm, acc: 92 + Math.floor(rng() * 6), log: synthLog(pick.text.length, wpm, rng) };
+    });
+    return {
+      id: `daily-${date}`, daily: true, live: false,
+      text: pick.text, source: `${lang.name} · ${pick.source}`, racers,
+      langPool: lang.name,
+      note: `daily challenge ${date} (${lang.name}) — same text, same bots for everyone`,
+    };
+  }
   const rng = mulberry32(seedFrom('tr3d-' + date));
   let text, source;
   try {

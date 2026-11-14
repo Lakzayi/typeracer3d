@@ -16,7 +16,7 @@ const ASSETS = [
   './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js',
   './js/hud.js', './js/sound.js', './js/demo-data.js', './js/modes.js', './js/drills.js', './js/stats.js',
   './js/ghost.js', './js/daily.js', './js/achievements.js', './js/paints.js', './js/share.js',
-  './js/net.js', './vendor/peerjs.min.js',
+  './js/net.js', './js/languages.js', './vendor/peerjs.min.js',
   './js/themes/index.js', './js/themes/shared.js',
   './js/themes/car.js', './js/themes/boat.js', './js/themes/horse.js', './js/themes/rocket.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-512-maskable.png',

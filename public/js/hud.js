@@ -56,7 +56,7 @@ export class HUD {
     const el = this.els.dataBadge;
     if (race.practice) {
       el.classList.remove('orange');
-      el.innerHTML = `🧘 <b>practice</b> · ${race.source || 'Monkeytype'} · no opponents, no stakes`;
+      el.innerHTML = `🧘 <b>practice</b> · ${race.langPool ? race.langSource : race.source || 'Monkeytype'} · no opponents, no stakes`;
     } else if (race.drill) {
       el.classList.remove('orange');
       el.innerHTML = `🎯 <b>drill</b> · ${race.source || 'aim trainer'} · solo, works offline`;
@@ -70,7 +70,7 @@ export class HUD {
       const wpms = race.racers.map((r) => r.wpm || 60).sort((a, b) => a - b);
       const mid = wpms[Math.floor(wpms.length / 2)] || 70;
       el.classList.remove('orange');
-      el.innerHTML = `🤖 <b>bot battle</b> · ${race.racers.length} bot${race.racers.length > 1 ? 's' : ''} @ ~${Math.round(mid)} wpm · your pace, your fight`;
+      el.innerHTML = `🤖 <b>bot battle</b> · ${race.racers.length} bot${race.racers.length > 1 ? 's' : ''} @ ~${Math.round(mid)} wpm · your pace, your fight${race.langPool ? ` · text: ${race.langPool}` : ''}`;
     } else if (race.daily) {
       el.classList.remove('orange');
       el.innerHTML = `📅 <b>daily challenge</b> · ${race.id.replace('daily-', '')} · same quote, same bots for everyone today`;
@@ -79,8 +79,9 @@ export class HUD {
       el.innerHTML = `🕹️ <b>single</b> · time trial · quote from a real TypeRacer race${race.id ? ` ${race.id}` : ''} — no opponents`;
     } else if (race.live) {
       const src = race.source ? ` · ${race.source.medium}${race.source.author ? ' — ' + race.source.author : ''}` : '';
+      const langNote = race.langPool ? ` · text: ${race.langPool}` : '';
       el.classList.remove('orange');
-      el.innerHTML = `🟢 <b>live data</b> · real TypeRacer race ${race.id || ''} · ${race.racers.length} real racer(s)${src}`;
+      el.innerHTML = `🟢 <b>live data</b> · real TypeRacer race ${race.id || ''} · ${race.racers.length} real racer(s)${src}${langNote}`;
     } else {
       el.classList.add('orange');
       el.innerHTML = `🟠 <b>offline fallback</b> · ${race.note || 'TypeRacer unreachable'}`;

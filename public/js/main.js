@@ -18,6 +18,7 @@ import { dailyRace, dailyState, markDailyDone, todayStr } from './daily.js';
 import { check as checkAchievements, renderAchievements } from './achievements.js';
 import { paintFor, GARAGE_DEFAULTS, PAINTS } from './paints.js';
 import { drawShareCard, shareCard } from './share.js';
+import { getLanguage, pickPoolText } from './languages.js';
 import {
   on as mpOn, createRoom as mpCreateRoom, joinRoom as mpJoinRoom,
   teardown as mpTeardown, startRace as mpNetStart, setSelfState, setSelfProvider, setRacing,
@@ -41,7 +42,7 @@ let lastPracticeId = null;
 
 const SETTINGS_KEY = 'tr3d_settings_v1';
 const settings = Object.assign(
-  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, ghostOn: false },
+  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, ghostOn: false, language: 'en' },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
 );
 
@@ -68,9 +69,17 @@ if (['chill', 'normal', 'hard', 'mine', 'real'].includes(CHALLENGE.diff)) {
   $('difficulty').value = CHALLENGE.diff;
 }
 
+/* RTL languages (Persian, Arabic) flip the typing flow right-to-left */
+function applyLanguageDir() {
+  const lang = getLanguage(settings.language);
+  document.body.classList.toggle('lang-rtl', lang.dir === 'rtl');
+}
+
 function applySettingsToUI() {
   $('typingMode').value = settings.typingMode;
   $('timeOfDay').value = settings.timeOfDay;
+  $('language').value = settings.language;
+  applyLanguageDir();
   hud.els.soundBtn.textContent = settings.soundOn ? '🔊' : '🔇';
   sound.enabled = settings.soundOn;
 }
@@ -88,6 +97,18 @@ $('timeOfDay').addEventListener('change', (e) => {
   settings.timeOfDay = e.target.value;
   saveSettings();
   world?.theme?.setTimeOfDay?.(settings.timeOfDay);
+});
+
+$('language').addEventListener('change', (e) => {
+  settings.language = e.target.value;
+  saveSettings();
+  applyLanguageDir();
+  const lang = getLanguage(settings.language);
+  hud.toast(lang.dir === 'rtl'
+    ? `${lang.flag} ${lang.name} — RTL typing flow · texts from the bundled pool`
+    : settings.language === 'en'
+      ? `${lang.flag} English — live TypeRacer data`
+      : `${lang.flag} ${lang.name} — texts from the bundled pool`, 2600);
 });
 
 hud.els.soundBtn.addEventListener('click', () => {
@@ -395,6 +416,17 @@ window.addEventListener('keydown', (e) => {
 
 /* ---------------- race flow ---------------- */
 
+/* non-English languages: swap the race TEXT for a bundled pool text. The
+ * fetched bot field stays — bots replay keystroke TIMING, which is text-
+ * independent, so a Persian race still runs against real TypeRacer pace. */
+function applyLanguageToRace(raceData) {
+  if (settings.language === 'en') return raceData;
+  const lang = getLanguage(settings.language);
+  const pick = pickPoolText(settings.language);
+  if (!pick) return raceData;
+  return { ...raceData, text: pick.text, langPool: lang.name, langSource: pick.source };
+}
+
 async function startRaceFlow() {
   if (phase === 'countdown' || phase === 'racing' || phase === 'loading') return;
   phase = 'loading';
@@ -412,12 +444,20 @@ async function startRaceFlow() {
   const challengeAttempt = CHALLENGE.raceId;
   try {
     if (mode === 'practice') {
-      hud.menuBadge('🧘 loading a Monkeytype quote…');
-      raceData = await API.practice(lastPracticeId);
+      if (settings.language !== 'en') {
+        const lang = getLanguage(settings.language);
+        const pick = pickPoolText(settings.language);
+        raceData = { id: 'pool-' + Date.now(), live: false, practice: true,
+          text: pick.text, source: `${lang.name} · ${pick.source}`,
+          note: 'practice text from the bundled pool', racers: [] };
+      } else {
+        hud.menuBadge('🧘 loading a Monkeytype quote…');
+        raceData = await API.practice(lastPracticeId);
+      }
     } else if (mode === 'daily') {
       hud.setStartBusy(true, '⏳ setting up today’s challenge…');
       hud.menuBadge('📅 rolling today’s seeded race…');
-      raceData = await dailyRace();
+      raceData = await dailyRace(settings.language);
     } else if (mode === 'drill') {
       hud.menuBadge(`🎯 ${$('drillType').value} drill — generating…`);
       raceData = drillRace($('drillType').value);
@@ -432,7 +472,7 @@ async function startRaceFlow() {
       raceData = { id: 'custom', custom: true, live: false, text: raw.slice(0, 600), source: 'your own text', note: 'custom text practice', racers: [] };
     } else if (mode === 'bot') {
       hud.menuBadge('🤖 spinning up the bots…');
-      const d = demoRace(lastRaceId); // bundled quote as the battlefield
+      const d = applyLanguageToRace(demoRace(lastRaceId)); // pool text on the battlefield
       const n = Math.max(1, Math.min(4, parseInt($('botCount').value, 10) || 2));
       const target = Math.max(20, Math.min(200, parseFloat($('botWpm').value) || 70));
       const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
@@ -447,14 +487,14 @@ async function startRaceFlow() {
       hud.menuBadge('⚔️ loading the challenged race…');
       raceData = await API.race({ id: challengeAttempt }); // throws if it no longer exists
     } else {
-      raceData = await API.race(lastRaceId);
+      raceData = applyLanguageToRace(await API.race(lastRaceId));
     }
     if (REAL_DATA_MODES.includes(mode)) CHALLENGE.raceId = null; // one-shot — "race again" picks a fresh race
   } catch (e) {
     if (challengeAttempt) {
       // the shared race is gone from TypeRacer — degrade gracefully
       hud.menuBadge('⚔️ that race is no longer available — picking a fresh one instead');
-      try { raceData = await API.race(lastRaceId); }
+      try { raceData = applyLanguageToRace(await API.race(lastRaceId)); }
       catch (e2) { hud.menuBadge(`✗ could not fetch a race: ${e2.message}`, true); hud.setStartBusy(false); phase = 'menu'; return; }
     } else {
       hud.menuBadge(`✗ could not fetch a race: ${e.message}`, true);
@@ -844,7 +884,7 @@ async function mpHostStart() {
       raceId = 'mp-' + Date.now().toString(36);
     } else {
       setMpStatus('fetching a real race…');
-      const rd = await API.race();
+      const rd = applyLanguageToRace(await API.race());
       text = rd.text; source = rd.source; raceId = rd.id;
     }
     setMpStatus('');
