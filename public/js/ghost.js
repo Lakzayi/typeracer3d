@@ -28,6 +28,9 @@ export function getGhost() {
 /* called after a race with a fully-typed text; ctx = { hits, startedAt, wpm, acc, mode } */
 export function maybeSaveGhost({ hits, startedAt, wpm, acc, mode }) {
   if (!startedAt || !hits?.length) return false;
+  // sanity: humans top out ~300 wpm — anything beyond is a glitched run
+  // (scripted/test input) and would poison the ghost forever
+  if (!isFinite(wpm) || wpm <= 0 || wpm > 400) return false;
   const cur = getGhost();
   if (cur && wpm <= cur.wpm) return false;
   const log = hits.map((h) => Math.round(h.t - startedAt));

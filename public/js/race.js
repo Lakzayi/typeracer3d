@@ -108,6 +108,7 @@ export class RaceController {
     const s = this.state[0];
     s.errorT = 0.3;
     this.world.shake(this.deadly ? 2.4 : 0.8);
+    this.world.impact(0, this.deadly ? 1.8 : 0.7);
     if (this.deadly && this.phase === 'racing' && !this.racers[0].finished) this._playerDied();
   }
 
@@ -123,6 +124,7 @@ export class RaceController {
     this.sound.stopEngine();
     this.sound.die();
     this.world.shake(2.4);
+    this.world.impact(0, 2.4);
     clearTimeout(this.endTimer);
     this.endTimer = setTimeout(() => this._finalize(), 1100);
   }

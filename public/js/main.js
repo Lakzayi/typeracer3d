@@ -17,6 +17,7 @@ import { getGhost, maybeSaveGhost, ghostLogFor } from './ghost.js';
 import { dailyRace, dailyState, markDailyDone, todayStr } from './daily.js';
 import { check as checkAchievements, renderAchievements } from './achievements.js';
 import { paintFor, GARAGE_DEFAULTS, PAINTS } from './paints.js';
+import { drawShareCard, shareCard } from './share.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -287,10 +288,11 @@ function syncModeRows() {
   $('customRow').hidden = mode !== 'custom';
   // the ghost toggle appears in every mode you personally type in, once a
   // ghost exists (bot battle included — race your pace against your bots)
-  $('ghostRow').hidden = !getGhost() || mode === 'daily';
+  const ghost = getGhost();
+  $('ghostRow').hidden = !ghost || mode === 'daily';
   $('ghostToggle').setAttribute('aria-pressed', String(settings.ghostOn));
-  $('ghostLabel').textContent = settings.ghostOn
-    ? `on — ${getGhost().wpm} wpm ghost on track`
+  $('ghostLabel').textContent = settings.ghostOn && ghost
+    ? `on — ${ghost.wpm} wpm ghost on track`
     : 'off';
 }
 
@@ -689,6 +691,32 @@ $('shareBtn').addEventListener('click', async () => {
     catch { hud.toast('couldn\'t copy — long-press the address bar instead', 2800); }
     ta.remove();
   }
+});
+
+/* share card — a 1200×630 PNG of the result for chats/social */
+$('shareCardBtn').addEventListener('click', async () => {
+  const results = lastResults;
+  const me = results && results.rows.find((r) => r.isPlayer);
+  if (!me) return;
+  const themeDef = THEMES[currentThemeId];
+  const modeDef = MODES[results.mode] ?? MODES.classic;
+  const died = !!results.died;
+  const solo = SOLO_MODES.includes(results.mode);
+  const card = drawShareCard({
+    wpm: Math.round(me.wpm),
+    acc: me.acc,
+    time: me.time,
+    place: died || solo ? null : (ORD[me.place - 1] ?? `${me.place}th`),
+    medal: died ? '' : solo ? '🏁'
+      : (['🥇', '🥈', '🥉'][me.place - 1] ?? '🏁'),
+    modeLabel: `${modeDef.icon} ${modeDef.name} · ${died ? 'death run' : solo ? 'solo run' : 'race'} — ${new Date().toLocaleDateString()}`,
+    themeLabel: `${themeDef ? themeDef.icon + ' ' + themeDef.name : ''}`,
+    streak: results.mode === 'daily' ? results.dailyStreak : null,
+    diedPct: died ? Math.round(results.died.progress01 * 100) : null,
+  });
+  const res = await shareCard(card, `typeracer3d-${Math.round(me.wpm)}wpm.png`);
+  if (res === 'shared') hud.toast('📣 card sent — show them who types faster!', 2400);
+  else if (res === 'downloaded') hud.toast('📸 PNG saved — post it anywhere!', 2800);
 });
 
 /* ---------------- render loop ---------------- */

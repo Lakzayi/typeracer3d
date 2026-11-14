@@ -102,6 +102,8 @@ export class World {
 
     this._streaks = this._makeStreaks();
     this.scene.add(this._streaks);
+    this._sparks = this._makeSparks();
+    this.scene.add(this._sparks);
 
     window.addEventListener('resize', () => this._resize());
     this._resize();
@@ -241,6 +243,55 @@ export class World {
     return pts;
   }
 
+  _makeSparks() {
+    const N = 56;
+    this._sparkP = [];
+    for (let i = 0; i < N; i++) {
+      this._sparkP.push({ vx: 0, vy: 0, vz: 0, life: 0, r: 0, g: 0, b: 0 });
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    const mat = new THREE.PointsMaterial({
+      size: 0.17, vertexColors: true, transparent: true, opacity: 0.95,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    this._sparkCursor = 0;
+    return pts;
+  }
+
+  /* spark burst at a vehicle — wrong keystroke / death. Additive material, so
+   * particles fade to black (invisible) as their life drains */
+  impact(vehIdx = 0, power = 1) {
+    const v = this.theme?.vehicles?.[vehIdx];
+    if (!v) return;
+    const pos = this._sparks.geometry.attributes.position.array;
+    const col = this._sparks.geometry.attributes.color.array;
+    const p = v.group.position;
+    const n = Math.min(Math.round(12 * power), this._sparkP.length);
+    for (let k = 0; k < n; k++) {
+      const i = (this._sparkCursor = (this._sparkCursor + 1) % this._sparkP.length);
+      const s = this._sparkP[i];
+      const a = Math.random() * Math.PI * 2;
+      s.vx = Math.cos(a) * (0.8 + Math.random() * 3.2 * power);
+      s.vy = 1.5 + Math.random() * 3.4 * power;
+      s.vz = Math.sin(a) * (0.8 + Math.random() * 3.2 * power);
+      s.life = 0.4 + Math.random() * 0.3;
+      // hot white-yellow → deep orange mix, kept for the fade pass
+      const hot = Math.random();
+      s.r = 1;
+      s.g = 0.55 + hot * 0.4;
+      s.b = 0.15 + hot * 0.45;
+      pos[i * 3] = p.x + (Math.random() - 0.5) * 0.9;
+      pos[i * 3 + 1] = (p.y ?? 0) + 0.4 + Math.random() * 0.6;
+      pos[i * 3 + 2] = p.z + (Math.random() - 0.5) * 1.2;
+    }
+    this._sparks.geometry.attributes.position.needsUpdate = true;
+    this._sparks.geometry.attributes.color.needsUpdate = true;
+  }
+
   /* per-frame */
   update(dt, racersState) {
     this._lastDt = dt; // for the 1Hz draw-call probe (see render)
@@ -266,6 +317,35 @@ export class World {
         }
       }
       this._streaks.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // spark bursts — gravity, floor bounce, additive fade-to-black
+    {
+      const sp = this._sparks.geometry.attributes.position.array;
+      const sc = this._sparks.geometry.attributes.color.array;
+      let alive = false;
+      for (let i = 0; i < this._sparkP.length; i++) {
+        const s = this._sparkP[i];
+        if (s.life <= 0) continue;
+        alive = true;
+        s.life -= dt;
+        s.vy -= 9.5 * dt;
+        sp[i * 3] += s.vx * dt;
+        sp[i * 3 + 1] += s.vy * dt;
+        sp[i * 3 + 2] += s.vz * dt;
+        if (sp[i * 3 + 1] < 0.06) { // bounce off the road, lose energy
+          sp[i * 3 + 1] = 0.06;
+          s.vy *= -0.35; s.vx *= 0.6; s.vz *= 0.6;
+        }
+        const f = Math.max(0, Math.min(1, s.life * 2.4));
+        sc[i * 3] = s.r * f;
+        sc[i * 3 + 1] = s.g * f;
+        sc[i * 3 + 2] = s.b * f;
+      }
+      if (alive) {
+        this._sparks.geometry.attributes.position.needsUpdate = true;
+        this._sparks.geometry.attributes.color.needsUpdate = true;
+      }
     }
 
     // confetti physics
