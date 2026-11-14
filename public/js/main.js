@@ -18,6 +18,11 @@ import { dailyRace, dailyState, markDailyDone, todayStr } from './daily.js';
 import { check as checkAchievements, renderAchievements } from './achievements.js';
 import { paintFor, GARAGE_DEFAULTS, PAINTS } from './paints.js';
 import { drawShareCard, shareCard } from './share.js';
+import {
+  on as mpOn, createRoom as mpCreateRoom, joinRoom as mpJoinRoom,
+  teardown as mpTeardown, startRace as mpNetStart, setSelfState, setSelfProvider, setRacing,
+  mpConnected, mpHost, mpCode, mpSelfId, mpPlayers,
+} from './net.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -354,6 +359,7 @@ $('menuBtn').addEventListener('click', () => backToMenu());
 function backToMenu() {
   if (swUpdatePending) { location.reload(); return; } // mid-race update: apply now that we're idle
   if (race) { race.dispose(); race = null; }
+  if (mpConnected()) { setRacing(false); mpTeardown(); } // leaving an mp race closes the room for us
   if (sound) sound.stopEngine();
   if (typing) { typing.disable(); }
   phase = 'menu';
@@ -371,7 +377,8 @@ function backToMenu() {
 window.addEventListener('keydown', (e) => {
   const inTyping = e.target && e.target.id === 'typeInput';
   if (e.key === 'Escape') {
-    if (garageOpen) closeGarage();
+    if (mpOpen) closeMpLobby();
+    else if (garageOpen) closeGarage();
     else if (phase === 'racing' || phase === 'countdown') backToMenu();
   }
   // live day/night toggle (never while typing the race text!)
@@ -476,14 +483,19 @@ async function startRaceFlow() {
   const difficulty = mode === 'bot' ? 'real' : $('difficulty').value; // bots run at YOUR configured pace
   const myName = stats ? stats.user : null;
   const myWpm = stats ? (stats.avgWpm || 70) : null;
+  await launchRace(raceData, { mode, difficulty, myName, myWpm });
+}
 
+/* shared tail of every race path (solo / bot / challenge / multiplayer):
+ * world + theme lineup, typing engine, controller, HUD, countdown, GO */
+async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = null }) {
   // --- world + theme ---
   if (!world) world = new World($('scene'));
   world.finishMode = false;
   world.focusIdx = 0;
 
   const racers = [{ name: 'YOU', isPlayer: true, paint: playerPaint(currentThemeId) }];
-  // bots from the real race (same order the controller derives) — each rolls a
+  // opponents in race order (same order the controller derives) — each rolls a
   // random model + livery, seeded by THIS race id so replays look identical
   const replaced = myName ? raceData.racers.find((r) => r.name.toLowerCase() === myName.toLowerCase()) : null;
   for (const r of raceData.racers) {
@@ -610,6 +622,11 @@ hud.onResults = (results) => {
   }
 
   origOnResults(results);
+  if (results.mode === 'mp') {
+    // keep the snapshot stream alive for a moment — peers on slower paths
+    // still need the final finish rows to build their own results board
+    setTimeout(() => setRacing(false), 800);
+  }
   recordRace(results); // local stats — every run counts, even a death run
 
   // achievements — toast each unlock
@@ -719,6 +736,192 @@ $('shareCardBtn').addEventListener('click', async () => {
   else if (res === 'downloaded') hud.toast('📸 PNG saved — post it anywhere!', 2800);
 });
 
+/* ---------------- multiplayer lobby (peer-to-peer via PeerJS) ---------------- */
+
+let mpOpen = false;
+let mpBusy = false;
+
+const escHtml = (s) => s.replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function setMpStatus(msg, err = false) {
+  const el = $('mpStatus');
+  if (!el) return;
+  el.textContent = msg ?? '';
+  el.classList.toggle('err', !!err);
+}
+
+function renderMpPlayers() {
+  const players = mpPlayers();
+  const self = mpSelfId();
+  $('mpPlayerList').innerHTML = players.map((p) => {
+    const tag = p.id === self
+      ? `<small>you${mpHost() ? ' · host' : ''}</small>`
+      : mpHost() ? '' : '<small>host</small>';
+    return `<div class="mpPl"><span class="dot"></span>${escHtml(p.name)}${tag}</div>`;
+  }).join('');
+  $('mpHostCtrls').classList.toggle('hidden', !mpHost());
+  $('mpGuestHint').classList.toggle('hidden', mpHost());
+}
+
+function showMpHome() {
+  $('mpHome').classList.remove('hidden');
+  $('mpWait').classList.add('hidden');
+  for (const id of ['mpCreateBtn', 'mpJoinBtn', 'mpCode']) $(id).disabled = false;
+  mpBusy = false;
+  setMpStatus('');
+}
+
+function showMpWait() {
+  $('mpHome').classList.add('hidden');
+  $('mpWait').classList.remove('hidden');
+  mpBusy = false; // create/join finished — unblock the start button
+  const host = mpHost();
+  $('mpRoomLine').innerHTML = host
+    ? `send this code to your friend — or click it to copy the invite link<b id="mpCodeBig">${mpCode()}</b>`
+    : `room <b style="font-size:22px">${escHtml(mpCode())}</b> — you are in!`;
+  if (host) {
+    $('mpCodeBig')?.addEventListener('click', async () => {
+      const url = new URL(location.href);
+      url.search = '?room=' + mpCode();
+      try { await navigator.clipboard.writeText(url.toString()); hud.toast('📋 invite link copied', 2200); } catch {}
+    });
+  }
+  renderMpPlayers();
+  setMpStatus('');
+}
+
+function openMpLobby(autoCode = null) {
+  if (phase !== 'menu' || mpOpen) return;
+  mpOpen = true;
+  hud.els.menu.classList.add('hidden');
+  $('mpView').classList.remove('hidden');
+  $('mpName').value = settings.name ?? '';
+  showMpHome();
+  if (autoCode) { $('mpCode').value = autoCode; joinWithCode(); }
+}
+
+function closeMpLobby() {
+  if (!mpOpen) return;
+  mpOpen = false;
+  $('mpView').classList.add('hidden');
+  hud.els.menu.classList.remove('hidden');
+  mpTeardown();
+}
+
+async function joinWithCode() {
+  const c = ($('mpCode').value || '').trim().toLowerCase();
+  if (!c || mpBusy) return;
+  mpBusy = true;
+  $('mpJoinBtn').disabled = true;
+  $('mpCreateBtn').disabled = true;
+  setMpStatus('connecting…');
+  const name = ($('mpName').value || '').trim() || 'YOU';
+  settings.name = name; saveSettings();
+  try {
+    await mpJoinRoom(c, name);
+    showMpWait();
+  } catch (e) {
+    setMpStatus(e.message, true);
+    $('mpJoinBtn').disabled = false;
+    $('mpCreateBtn').disabled = false;
+    mpBusy = false;
+  }
+}
+
+/* host pressed START — fetch (or take) the text, tell everyone, race */
+async function mpHostStart() {
+  if (!mpHost() || mpBusy) return;
+  mpBusy = true;
+  $('mpStartBtn').disabled = true;
+  try {
+    const type = $('mpRaceType').value;
+    let text, source, raceId;
+    if (type === 'custom') {
+      text = $('mpCustomText').value.trim();
+      if (!text) { setMpStatus('paste a text first', true); return; }
+      source = 'custom text';
+      raceId = 'mp-' + Date.now().toString(36);
+    } else {
+      setMpStatus('fetching a real race…');
+      const rd = await API.race();
+      text = rd.text; source = rd.source; raceId = rd.id;
+    }
+    setMpStatus('');
+    mpNetStart(text, source, raceId); // clients launch via the 'start' event
+    await mpLaunch({ text, source, raceId });
+  } catch (e) {
+    setMpStatus('could not start: ' + e.message, true);
+  } finally {
+    mpBusy = false;
+    $('mpStartBtn').disabled = false;
+  }
+}
+
+/* both sides land here: hide the lobby and put everyone on the grid */
+async function mpLaunch({ text, source, raceId }) {
+  if (phase !== 'menu') return;
+  mpOpen = false;
+  $('mpView').classList.add('hidden');
+  setRacing(true);
+  await launchRace({
+    id: raceId, text, source, mp: true,
+    racers: mpPlayers().filter((p) => p.id !== mpSelfId())
+      .map((p) => ({ name: p.name, isRemote: true, remoteId: p.id })),
+  }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null });
+}
+
+/* fresh self state read at SEND time (background tabs throttle rAF — the
+ * wire must never carry stale progress). On finish the FINAL overall wpm. */
+setSelfProvider(() => race && race.mode === 'mp' && typing ? {
+  pos: typing.pos,
+  wpm: typing.finishedAt ? typing.overallWpm() : typing.recentWpm(),
+  finished: !!typing.finishedAt,
+  time: typing.finishedAt ? typing.elapsedSec() : null,
+  acc: typing.accuracy(),
+} : null);
+
+/* net events */
+mpOn('room', () => showMpWait());
+mpOn('players', () => { if (mpOpen) renderMpPlayers(); });
+mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
+mpOn('start', (msg) => mpLaunch(msg));
+mpOn('snap', (rows) => { if (race?.mode === 'mp' && race.phase === 'racing') race.applyRemote(rows); });
+mpOn('left', ({ id }) => {
+  if (race?.mode === 'mp') race.remoteLeft(id);
+  if (race?.mode === 'mp' && race.phase === 'racing') hud.toast('📴 a player left the race', 2000);
+});
+mpOn('roomClosed', () => {
+  if (race?.mode === 'mp') backToMenu();
+  closeMpLobby();
+  hud.toast('📴 the host closed the room', 2600);
+});
+
+$('mpOpenBtn').addEventListener('click', () => openMpLobby());
+$('mpBackBtn').addEventListener('click', closeMpLobby);
+$('mpCreateBtn').addEventListener('click', async () => {
+  if (mpBusy) return;
+  mpBusy = true;
+  $('mpCreateBtn').disabled = true;
+  $('mpJoinBtn').disabled = true;
+  setMpStatus('creating the room…');
+  const name = ($('mpName').value || '').trim() || 'YOU';
+  settings.name = name; saveSettings();
+  try {
+    await mpCreateRoom(name);
+    showMpWait();
+  } catch (e) {
+    showMpHome(); // reset the buttons, then surface the real error on top
+    setMpStatus(e.message, true);
+  }
+});
+$('mpJoinBtn').addEventListener('click', joinWithCode);
+$('mpCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinWithCode(); });
+$('mpRaceType').addEventListener('change', () => {
+  $('mpCustomText').classList.toggle('hidden', $('mpRaceType').value !== 'custom');
+});
+$('mpStartBtn').addEventListener('click', mpHostStart);
+
 /* ---------------- render loop ---------------- */
 
 let lastT = performance.now();
@@ -730,6 +933,12 @@ function loop(t) {
 
   if (race) {
     race.update(dt);
+    // multiplayer: stream my progress into the room every frame — net.js
+    // throttles the wire traffic, this just keeps the latest state available
+    if (race.mode === 'mp' && race.phase !== 'ready') {
+      setSelfState(typing.pos, typing.recentWpm(), !!typing.finishedAt,
+        typing.finishedAt ? typing.elapsedSec() : null, typing.accuracy());
+    }
     world.speed01 = race.state[0].speed01;
     sound.engineSpeed(world.smoothSpeed01);
     world.update(dt, race.state);
@@ -755,6 +964,12 @@ renderDaily();
 rebuildIdleTheme(); // menu backdrop = a live parked view of YOUR garage ride
 renderGarage();
 requestAnimationFrame(loop);
+
+/* an invite link (?room=code) opens straight into the lobby and joins */
+{
+  const roomParam = new URLSearchParams(location.search).get('room');
+  if (roomParam) openMpLobby(roomParam.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5));
+}
 
 /* debug/test handle (also handy in devtools) */
 window.__tr3d = {

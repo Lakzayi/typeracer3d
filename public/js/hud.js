@@ -63,6 +63,9 @@ export class HUD {
     } else if (race.custom) {
       el.classList.remove('orange');
       el.innerHTML = `📝 <b>custom text</b> · your own words · solo run`;
+    } else if (race.mp) {
+      el.classList.remove('orange');
+      el.innerHTML = `🎮 <b>multiplayer</b> · ${race.source || 'live'} · ${race.racers.length + 1} human${race.racers.length ? 's' : ''} · peer-to-peer`;
     } else if (race.bot) {
       const wpms = race.racers.map((r) => r.wpm || 60).sort((a, b) => a - b);
       const mid = wpms[Math.floor(wpms.length / 2)] || 70;
@@ -278,7 +281,9 @@ export class HUD {
       </div>`).join('') +
       (['single', 'practice', 'drill', 'custom'].includes(results.mode)
         ? ''
-        : results.mode === 'bot'
+        : results.mode === 'mp'
+          ? `<div class="real">🎮 live multiplayer — each of you typed this on your own screen</div>`
+          : results.mode === 'bot'
           ? `<div class="real">synthetic bots — at the pace you configured</div>`
           : results.mode === 'daily'
             ? `<div class="real">seeded bots — identical for every player today</div>`

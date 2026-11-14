@@ -70,8 +70,19 @@ export class RaceController {
       racingAs: replaced ? replaced.name : null,
     });
     for (const r of race.racers) {
-      if (this.racers.length > MAX_BOTS && !r.isGhost) break;
+      if (this.racers.length > MAX_BOTS && !r.isGhost && !r.isRemote) break;
       if (replaced && r.name === replaced.name) continue;
+      // multiplayer humans — progress arrives live over the network, nothing
+      // is simulated here (net.js drives remotePos/remoteWpm via applyRemote)
+      if (r.isRemote) {
+        this.racers.push({
+          name: r.name, isPlayer: false, color: '#888',
+          isRemote: true, remoteId: r.remoteId,
+          remoteWpm: 0, realAcc: 95,
+          progressChars: 0, finished: false, finishTime: null, errorT: 0,
+        });
+        continue;
+      }
       const isGhost = !!r.isGhost;
       const jitter = isGhost ? 1 : 0.94 + rng() * 0.12;
       const wpm = isGhost ? (r.wpm || 60) : Math.max(8, (r.wpm || 60) * factor * jitter);
@@ -137,7 +148,7 @@ export class RaceController {
 
     // bots
     for (const b of this.racers) {
-      if (b.isPlayer || b.finished) continue;
+      if (b.isPlayer || b.isRemote || b.finished) continue;
       let chars;
       if (b.log) {
         chars = upperBound(b.log, this.raceTime * 1000 * b.rate);
@@ -177,8 +188,34 @@ export class RaceController {
     this.world.finishMode = true;
     this.world.focusIdx = 0;
     this.world.confettiBurst(this.world.theme.vehicles[0].group.position);
-    // let stragglers finish (or cut it short — solo has nobody to wait for)
-    this.endTimer = setTimeout(() => this._finalize(), this.solo ? 2600 : 6000);
+    // let stragglers finish (or cut it short — solo has nobody to wait for;
+    // multiplayer humans get a long leash before their progress is frozen)
+    this.endTimer = setTimeout(() => this._finalize(), this.solo ? 2600 : this.mode === 'mp' ? 30000 : 6000);
+  }
+
+  /* live progress for a multiplayer human, straight from the network snapshot */
+  applyRemote(rows) {
+    for (const row of rows) {
+      const r = this.racers.find((x) => x.isRemote && x.remoteId === row.id);
+      if (!r || r.isPlayer) continue;
+      r.progressChars = Math.min(this.textLen, row.pos ?? 0);
+      r.remoteWpm = row.wpm ?? 0;
+      if (row.finished && !r.finished) {
+        r.finished = true;
+        r.finishTime = row.time ?? this.raceTime;
+        r.realAcc = row.acc ?? 95;
+        r.remoteWpm = row.wpm ?? r.remoteWpm;
+      }
+    }
+  }
+
+  /* a multiplayer peer dropped mid-race — freeze them where they were */
+  remoteLeft(id) {
+    const r = this.racers.find((x) => x.isRemote && x.remoteId === id);
+    if (r && !r.finished) {
+      r.finished = true;
+      r.finishTime = this.raceTime;
+    }
   }
 
   _finalize() {
@@ -187,7 +224,7 @@ export class RaceController {
     const rows = this.racers.map((r, i) => {
       const st = this.state[i];
       const chars = r.isPlayer ? this.typing.pos : r.progressChars;
-      const wpm = r.isPlayer ? this.typing.overallWpm() : (r.wpm ?? 60);
+      const wpm = r.isPlayer ? this.typing.overallWpm() : r.isRemote ? (r.remoteWpm ?? 0) : (r.wpm ?? 60);
       const acc = r.isPlayer ? this.typing.accuracy() : (r.realAcc ?? 95);
       const time = r.isPlayer ? this.typing.elapsedSec() : (r.finishTime ?? null);
       return { name: r.name, isPlayer: r.isPlayer, progress01: chars / this.textLen, wpm, acc, time, finished: r.finished, racingAs: r.racingAs || null };
@@ -226,6 +263,11 @@ export class RaceController {
         s.speed01 = this.died ? 0 : Math.min(1, s.wpm / 130); // dead car coasts to a stop
         s.comboHeat = this.comboHeat;
         if (s.finished && s.finishT == null) s.finishT = this.typing.elapsedSec();
+      } else if (r.isRemote) {
+        // multiplayer humans — state comes straight off the wire
+        s.wpm = r.remoteWpm ?? 0;
+        s.speed01 = Math.min(1, s.wpm / 130);
+        if (s.finished && s.finishT == null) s.finishT = r.finishTime ?? this.raceTime;
       } else if (r.log) {
         // replayed keystroke logs (ghost + real-timing bots) — show their live
         // pace instead of a frozen nominal number

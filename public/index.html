@@ -122,8 +122,14 @@
         <span class="gIc">🔧</span>
         <span class="gTx"><b>your garage</b><small><span id="garageMiniLabel">—</span> · saved on this device</small></span>
         <span class="gDots" id="garageMiniDots"></span>
-        <span class="gGo">OPEN ▸</span>
-      </button>
+      <span class="gGo">OPEN ▸</span>
+    </button>
+
+    <button id="mpOpenBtn" class="garageOpenBtn glass" type="button">
+      <span class="gIc">🎮</span>
+      <span class="gTx"><b>play with a friend</b><small>live online race — peer-to-peer, no server</small></span>
+      <span class="gGo">OPEN ▸</span>
+    </button>
 
       <!-- daily challenge — one seeded race per day, same for everyone -->
       <button id="dailyBanner" class="glass dailyBanner" type="button">
@@ -297,6 +303,47 @@
       <div class="gcRow"><label>primary</label><div id="garagePrimary" class="swatches"></div></div>
       <div class="gcRow"><label>secondary</label><div id="garageSecondary" class="swatches"></div></div>
       <div class="garageHint">bots roll random liveries every race — this one is yours, saved on this device</div>
+    </div>
+  </div>
+
+  <!-- ============ MULTIPLAYER LOBBY ============ -->
+  <div id="mpView" class="hidden">
+    <div class="gvHeader">
+      <button id="mpBackBtn" class="glass">‹ menu</button>
+      <h2>🎮 race a friend — live</h2>
+      <span class="mpHeaderPad"></span>
+    </div>
+    <div class="gvSpacer"></div>
+    <div class="gvPanel glass">
+      <div id="mpHome" class="mpSection">
+        <label>your name in the race</label>
+        <input id="mpName" class="mpInput" maxlength="14" placeholder="e.g. Hossein" autocomplete="off">
+        <div class="mpChoices">
+          <button id="mpCreateBtn" class="mpBigBtn">🏠 create room</button>
+          <div class="mpJoin">
+            <input id="mpCode" class="mpInput mpCode" maxlength="5" placeholder="code" autocomplete="off" spellcheck="false">
+            <button id="mpJoinBtn" class="mpBigBtn">▸ join</button>
+          </div>
+        </div>
+        <div class="garageHint">you each race on your own screen — same text, live progress, peer-to-peer</div>
+      </div>
+      <div id="mpWait" class="mpSection hidden">
+        <div id="mpRoomLine" class="mpRoomLine"></div>
+        <div id="mpPlayerList" class="mpPlayerList"></div>
+        <div id="mpHostCtrls" class="mpHostCtrls hidden">
+          <div class="gcRow">
+            <label>race</label>
+            <select id="mpRaceType">
+              <option value="real">🎲 random real TypeRacer race</option>
+              <option value="custom">✍️ custom text</option>
+            </select>
+          </div>
+          <textarea id="mpCustomText" class="mpInput hidden" rows="3" placeholder="paste the text everyone will type…"></textarea>
+          <button id="mpStartBtn">🏁 start the race</button>
+        </div>
+        <div id="mpGuestHint" class="garageHint">connected — waiting for the host to start…</div>
+      </div>
+      <div id="mpStatus" class="mpStatus"></div>
     </div>
   </div>
 
