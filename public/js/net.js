@@ -227,26 +227,41 @@ export async function createRoom(name) {
 
 /* ---------- client side ---------- */
 
-/* connect with typed failures. A real 'peer-unavailable' means the room is
- * genuinely absent (host left the lobby / wrong code); a silent timeout is
- * usually transient signaling — worth exactly one retry before giving up. */
+/* connect with typed failures and live stage feedback. A real
+ * 'peer-unavailable' means the room is genuinely absent (host left the
+ * lobby / wrong code). A timeout means signaling worked but the WebRTC
+ * data channel never opened — with TURN in the mix that can legitimately
+ * take 10+s from strict-NAT networks, hence the generous 15s window. */
 function connectToHost(peer, roomCode) {
   const ROOM_MSG = 'room not found — the host may have left the lobby. Ask for a fresh invite link';
+  const ICE_MSG = 'the peer-to-peer link failed — a VPN/proxy or strict NAT is blocking it. try toggling any VPN (on↔off, both of you) and join again';
+  const TIMEOUT_MSG = "couldn't reach the room — the peer link kept timing out. try once more; if it repeats, toggle any VPN/proxy (this is usually the network, not the room)";
+  const iceState = (conn) => { try { return conn.peerConnection?.iceConnectionState ?? 'unknown'; } catch { return 'unknown'; } };
   const attempt = () => new Promise((resolve, reject) => {
     const conn = peer.connect(ID_PREFIX + roomCode, { reliable: true });
     let settled = false;
-    const fail = setTimeout(() => { if (!settled) { settled = true; reject({ type: 'timeout' }); } }, 7000);
+    // live feedback while ICE works — strict-NAT joiners otherwise stare at
+    // a silent "connecting…" and give up while TURN is still negotiating
+    const probe = setInterval(() => {
+      if (settled) return;
+      const ice = iceState(conn);
+      if (ice === 'checking') emit('status', { msg: 'signaling ok — negotiating the peer link (strict NAT? this can take ~15s)…' });
+    }, 1500);
+    const settle = (fn, arg) => { if (settled) return; settled = true; clearInterval(probe); fn(arg); };
+    const fail = setTimeout(() => settle(reject, { type: 'timeout', ice: iceState(conn) }), 15000);
     peer.on('error', (err) => {
       if (settled || err.type !== 'peer-unavailable') return;
-      settled = true; clearTimeout(fail); reject({ type: 'peer-unavailable' });
+      settle(reject, { type: 'peer-unavailable' });
     });
-    conn.on('open', () => { if (!settled) { settled = true; clearTimeout(fail); resolve(conn); } });
+    conn.on('open', () => settle(resolve, conn));
   });
   return attempt().catch((e) => {
     if (e.type === 'peer-unavailable') throw new Error(ROOM_MSG);
+    if (e.ice === 'failed') throw new Error(ICE_MSG);
     return attempt().catch((e2) => {
       if (e2.type === 'peer-unavailable') throw new Error(ROOM_MSG);
-      throw new Error("couldn't reach the room — check your connection; the host's lobby may have closed");
+      if (e2.ice === 'failed') throw new Error(ICE_MSG);
+      throw new Error(TIMEOUT_MSG);
     });
   });
 }
