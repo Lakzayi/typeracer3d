@@ -11,7 +11,16 @@ const KEY = 'tr3d_ghost_v1';
 export function getGhost() {
   try {
     const g = JSON.parse(localStorage.getItem(KEY));
-    if (g && Array.isArray(g.log) && g.log.length > 4 && g.wpm > 0) return g;
+    if (g && Array.isArray(g.log) && g.log.length > 4 && g.wpm > 0) {
+      // a gap > 15s inside the log means the run was recorded across a pause
+      // (pre-virtual-clock builds baked paused time in) — the replay would
+      // stall mid-race at that point, so don't trust it
+      if (g.log[0] > 15000) return null;
+      for (let i = 1; i < g.log.length; i++) {
+        if (g.log[i] - g.log[i - 1] > 15000) return null;
+      }
+      return g;
+    }
   } catch (e) { /* corrupt — ignore */ }
   return null;
 }
@@ -29,10 +38,17 @@ export function maybeSaveGhost({ hits, startedAt, wpm, acc, mode }) {
   return true; // new ghost set
 }
 
-/* pace curve of the ghost scaled onto the current text length */
+/* pace curve of the ghost scaled onto the current text length. Enforces a
+ * minimum 40ms interval (monotonic) so heavy compression (fast ghost, much
+ * shorter text) can never collapse timestamps into an instant teleport. */
 export function ghostLogFor(textLen) {
   const g = getGhost();
   if (!g) return null;
   const k = textLen / g.len;
-  return g.log.map((t) => Math.max(80, Math.round(t * k)));
+  let prev = 0;
+  return g.log.map((t) => {
+    const v = Math.max(prev + 40, Math.round(t * k));
+    prev = v;
+    return v;
+  });
 }

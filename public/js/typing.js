@@ -31,6 +31,10 @@ export class TypingEngine {
     this.enabled = false;
     this.hits = []; // {t, c} keystroke log for rolling WPM
     this.spans = [];
+    // virtual clock — pauses must NOT leak into the keystroke log, the WPMs
+    // or the ghost replay: a paused gap used to be baked in as dead time
+    this.pausedTotal = 0;
+    this.pauseStart = null;
 
     inputEl.addEventListener('keydown', (e) => this._keydown(e));
   }
@@ -41,6 +45,7 @@ export class TypingEngine {
     this.buffer = []; this.bufferEls = [];
     this.combo = 0; this.maxCombo = 0; this._nextMilestone = 0;
     this.startedAt = null; this.finishedAt = null; this.hits = [];
+    this.pausedTotal = 0; this.pauseStart = null;
     this.textEl.innerHTML = '';
     this.spans = [];
     const frag = document.createDocumentFragment();
@@ -57,6 +62,12 @@ export class TypingEngine {
 
   enable() { this.enabled = true; }
   disable() { this.enabled = false; }
+
+  /* virtual clock: excludes paused wall-clock time so a mid-race pause never
+   * pollutes the keystroke log, the WPMs, or the saved ghost */
+  pause() { if (this.startedAt && this.pauseStart == null) this.pauseStart = performance.now(); }
+  resume() { if (this.pauseStart != null) { this.pausedTotal += performance.now() - this.pauseStart; this.pauseStart = null; } }
+  _now() { return performance.now() - this.pausedTotal; }
 
   get blocked() { return this.mode === 'realistic' && this.buffer.length > 0; }
 
@@ -81,7 +92,7 @@ export class TypingEngine {
     if (this.finishedAt) return;
 
     if (!this.startedAt) {
-      this.startedAt = performance.now();
+      this.startedAt = this._now();
       this.hooks.onStart && this.hooks.onStart();
     }
 
@@ -96,12 +107,12 @@ export class TypingEngine {
         this.hooks.onMilestone && this.hooks.onMilestone(MILESTONES[this._nextMilestone]);
         this._nextMilestone++;
       }
-      this.hits.push({ t: performance.now(), c: this.correct });
+      this.hits.push({ t: this._now(), c: this.correct });
       if (this.pos < this.text.length) {
         this._paintCaret();
         this._scrollToCaret();
       } else {
-        this.finishedAt = performance.now();
+        this.finishedAt = this._now();
         this.enabled = false;
         this.hooks.onFinish && this.hooks.onFinish();
       }
@@ -153,7 +164,7 @@ export class TypingEngine {
 
   /* rolling WPM over the last `windowMs` of typing */
   recentWpm(windowMs = 4000) {
-    const now = performance.now();
+    const now = this._now();
     const cutoff = now - windowMs;
     let past = { t: this.startedAt ?? now, c: 0 };
     for (let i = this.hits.length - 1; i >= 0; i--) {
@@ -166,7 +177,7 @@ export class TypingEngine {
 
   overallWpm() {
     if (!this.startedAt) return 0;
-    const end = this.finishedAt ?? performance.now();
+    const end = this.finishedAt ?? this._now();
     const mins = (end - this.startedAt) / 60000;
     if (mins <= 0) return 0;
     return (this.correct / 5) / mins;
@@ -179,6 +190,6 @@ export class TypingEngine {
 
   elapsedSec() {
     if (!this.startedAt) return 0;
-    return ((this.finishedAt ?? performance.now()) - this.startedAt) / 1000;
+    return ((this.finishedAt ?? this._now()) - this.startedAt) / 1000;
   }
 }

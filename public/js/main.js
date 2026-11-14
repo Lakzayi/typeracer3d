@@ -410,7 +410,10 @@ function setPaused(p) {
   if (!race || race.phase !== 'racing') return;
   race.setPaused(p);
   hud.setPaused(p);
-  if (p) typing.disable(); else { typing.enable(); typing.focus(); }
+  // freeze/unfreeze the typing clock too — a paused gap must never leak into
+  // the keystroke log (ghost replays, PB, wpm display all depend on it)
+  if (p) { typing.disable(); typing.pause(); }
+  else { typing.enable(); typing.resume(); typing.focus(); }
 }
 
 $('pauseOverlay').addEventListener('click', () => setPaused(false));

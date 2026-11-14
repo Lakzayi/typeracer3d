@@ -15,6 +15,19 @@ function upperBound(arr, x) {
   return lo;
 }
 
+/* instantaneous pace of a keystroke-log racer (ghost, real-keystroke bots),
+ * measured over the last `windowS` seconds of log time — a constant display
+ * of the saved/nominal wpm would hide the real rhythm of the replay */
+function liveLogWpm(log, raceTime, windowS = 8) {
+  const end = (log[log.length - 1] + 100) / 1000;
+  const t2 = Math.min(raceTime, end) * 1000;
+  const t1 = Math.max(0, t2 - windowS * 1000);
+  if (t2 - t1 < 500) return 0;
+  const c2 = upperBound(log, t2);
+  const c1 = upperBound(log, t1);
+  return (c2 - c1) / 5 / ((t2 - t1) / 60000);
+}
+
 export class RaceController {
   constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic' }) {
     this.race = race;
@@ -211,6 +224,12 @@ export class RaceController {
         s.speed01 = this.died ? 0 : Math.min(1, s.wpm / 130); // dead car coasts to a stop
         s.comboHeat = this.comboHeat;
         if (s.finished && s.finishT == null) s.finishT = this.typing.elapsedSec();
+      } else if (r.log) {
+        // replayed keystroke logs (ghost + real-timing bots) — show their live
+        // pace instead of a frozen nominal number
+        s.wpm = r.finished ? (r.wpm ?? 60) : liveLogWpm(r.log, this.raceTime);
+        s.speed01 = Math.min(1, s.wpm / 130);
+        if (s.finished && s.finishT == null) s.finishT = r.finishTime ?? this.raceTime;
       } else {
         s.wpm = r.wpm ?? 60;
         s.speed01 = Math.min(1, (r.wpm ?? 60) / 130);
