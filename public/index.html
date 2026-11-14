@@ -24,6 +24,12 @@
   <link rel="manifest" href="manifest.webmanifest"/>
   <link rel="stylesheet" href="./style.css"/>
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
+  <script>
+    /* dev aid: surface module boot errors on window.__errs for the QA harness */
+    window.__errs = [];
+    addEventListener('error', (e) => window.__errs.push(`${e.message} @ ${(e.filename || '').split('/').pop()}:${e.lineno}:${e.colno}`));
+    addEventListener('unhandledrejection', (e) => window.__errs.push('REJ: ' + String(e.reason && e.reason.stack || e.reason)));
+  </script>
 </head>
 <body>
   <!-- liquid-glass refraction filters (Chrome/Edge: real edge displacement;
@@ -110,6 +116,20 @@
       </header>
 
       <div id="themeCards" class="themeGrid"></div>
+
+      <!-- your garage — pick YOUR vehicle model & colors for the current theme -->
+      <section id="garagePanel" class="glass garagePanel">
+        <div class="sectionHead">
+          <h2>🔧 your garage — <span id="garageThemeName" class="garageTheme"></span></h2>
+          <button id="garageRandom" title="randomize my ride">🎲 random</button>
+        </div>
+        <div id="garageModels" class="garageModels"></div>
+        <div class="garageColors">
+          <div class="gcRow"><label>primary</label><div id="garagePrimary" class="swatches"></div></div>
+          <div class="gcRow"><label>secondary</label><div id="garageSecondary" class="swatches"></div></div>
+        </div>
+        <div class="garageHint">bots roll random liveries every race — this one is yours, saved on this device</div>
+      </section>
 
       <!-- daily challenge — one seeded race per day, same for everyone -->
       <button id="dailyBanner" class="glass dailyBanner" type="button">

@@ -141,27 +141,44 @@ function radialGlowTexture(color = '#ffd9a0') {
   }, 128, 128);
 }
 
-function buildCar(color, { player = false } = {}) {
+/* paint = { primary, secondary, variant } — variant 0 GT sedan · 1 muscle · 2 rally */
+function buildCar(p0, { player = false } = {}) {
+  const P = typeof p0 === 'string' ? { primary: p0, secondary: null, variant: 0 } : (p0 ?? {});
+  const color = P.primary ?? '#ff4757';
+  const variant = P.variant ?? 0;
   const g = new THREE.Group();
   // r12/r13 paint: clearcoat lacquer + panel/seam map from the loft UVs and a
   // strong metallic base so full-sun shots read as GLOSS, not matte plastic
   // (critic LOW #6): r13 sharpens the coat (rr 0.05) and pushes env response
   // to 1.75 so the sky sheen on the horizontal panels is unmistakable
-  const paint = new THREE.MeshPhysicalMaterial({
+  const paintMat = new THREE.MeshPhysicalMaterial({
     color, map: carPaintTexture(), roughness: 0.3, metalness: 0.66,
     clearcoat: 1.0, clearcoatRoughness: 0.05, envMapIntensity: 1.75,
   });
+  const paint = paintMat; // keep the historic variable name for the body mesh
+  // secondary color — roof cap / scoop / spoiler / stripes (two-tone livery)
+  const accentMat = P.secondary ? new THREE.MeshPhysicalMaterial({
+    color: P.secondary, map: carPaintTexture(), roughness: 0.3, metalness: 0.66,
+    clearcoat: 1.0, clearcoatRoughness: 0.05, envMapIntensity: 1.75,
+  }) : null;
   const dark = new THREE.MeshStandardMaterial({ color: '#16181d', roughness: 0.95, metalness: 0.0, envMapIntensity: 0.05 });
   // r12 iterate: real car glass reads DARK from outside (black interior + a
-  // sliver of sky reflection) — the pale tint read as a solid canopy
-  const glass = new THREE.MeshStandardMaterial({ color: '#2e4a5e', roughness: 0.08, metalness: 0.65, transparent: true, opacity: 0.78, envMapIntensity: 1.5 });
+  // sliver of sky reflection) — the pale tint read as a solid canopy.
+  // Two-tone liveries: the canopy is tinted toward the SECONDARY color so the
+  // combo reads from the chase cam (the roof cap alone hides under the glass)
+  const glass = new THREE.MeshStandardMaterial({
+    color: P.secondary ?? '#2e4a5e', roughness: 0.08, metalness: 0.65,
+    transparent: true, opacity: P.secondary ? 0.62 : 0.78, envMapIntensity: 1.5,
+  });
 
   /* ---- lower body: one loft — bumper nose → hood → beltline → deck → tail.
    * Superellipse sections (k=3) give rounded body sides, the station heights
    * give the three-box silhouette (hood drop, belt peak, trunk step). ONE
-   * indexed geometry ≈ 250 verts. */
+   * indexed geometry ≈ 250 verts. Variant tables reshape the SAME footprint:
+   * muscle chops the roof and widens the hips, rally lifts the whole body
+   * over bigger arches. */
   const N = 20, K = 3.0;
-  const st = [ // [z, halfWidth, bottomY, topY]
+  let st = [ // [z, halfWidth, bottomY, topY]
     [-2.075, 0.84, 0.36, 0.68],  // nose tip
     [-2.04, 0.90, 0.31, 0.84],   // front face
     [-1.85, 0.93, 0.30, 0.79],   // hood leading edge
@@ -175,29 +192,49 @@ function buildCar(color, { player = false } = {}) {
     [1.90, 0.91, 0.30, 0.92],
     [2.075, 0.85, 0.36, 0.86],   // tail face
   ];
+  let gh = [ // greenhouse [z, halfWidth, y0, y1]
+    [-0.50, 0.88, 0.92, 1.00],
+    [-0.28, 0.82, 0.94, 1.24],
+    [-0.02, 0.72, 1.04, 1.37],
+    [0.55, 0.70, 1.07, 1.41],
+    [0.95, 0.74, 1.03, 1.33],
+    [1.20, 0.82, 0.94, 1.05],
+  ];
+  let roofY = 1.40, mirrorY = 1.00;
+  if (variant === 1) { // muscle — hips out, roof chopped, deck shortened
+    st = st.map(([z, hw, y0, y1]) => [z, Math.min(1.02, hw + 0.06), y0, y1]);
+    gh = gh.map(([z, hw, y0, y1]) => [z, Math.min(1.0, hw + 0.04), y0, y1 - 0.13]);
+    roofY = 1.27;
+  } else if (variant === 2) { // rally — the whole body rides 9cm higher
+    st = st.map(([z, hw, y0, y1]) => [z, hw, y0 + 0.09, y1 + 0.09]);
+    gh = gh.map(([z, hw, y0, y1]) => [z, hw, y0 + 0.09, y1 + 0.09]);
+    roofY = 1.49; mirrorY = 1.09;
+  }
   const bodyRings = st.map(([z, hw, y0, y1]) => superRing(0, (y0 + y1) / 2, z, hw, (y1 - y0) / 2, K, N));
   const bodyGeo = loftSections(bodyRings, { capStart: true, capEnd: true });
 
   // fender arches — half-torus flares over the four wheels; merged into the
   // paint mesh (wheel arches were the top car mandate this round)
+  const archR = variant === 2 ? 0.50 : 0.44;
+  const archTube = variant === 2 ? 0.10 : 0.085;
   const arches = [];
   for (const wz of [-1.35, 1.4]) {
     for (const wx of [-0.90, 0.90]) {
-      const arch = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.085, 8, 18, Math.PI));
+      const arch = new THREE.Mesh(new THREE.TorusGeometry(archR, archTube, 8, 18, Math.PI));
       arch.rotation.y = Math.PI / 2; // arc into the ZY plane (over the wheel)
       arch.position.set(wx, 0.38, wz);
       arches.push(arch);
     }
   }
-  // paint roof cap + mirror shells ride with the paint mesh
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.06, 1.5), paint);
-  roof.position.set(0, 1.40, 0.42);
+  // roof cap (secondary two-tone when the livery has one) + mirror shells
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.42, 0.06, 1.5), accentMat ?? paint);
+  roof.position.set(0, roofY, 0.42);
   const mirrorShells = [];
   for (const mx of [-0.98, 0.98]) {
     const shell = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.09, 0.07), paint);
-    shell.position.set(mx, 1.00, -0.38);
+    shell.position.set(mx, mirrorY, -0.38);
     const stalk = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.04), paint);
-    stalk.position.set(mx * 0.92, 0.985, -0.38);
+    stalk.position.set(mx * 0.92, mirrorY - 0.015, -0.38);
     stalk.rotation.z = mx > 0 ? -0.25 : 0.25;
     mirrorShells.push(shell, stalk);
   }
@@ -208,15 +245,8 @@ function buildCar(color, { player = false } = {}) {
   g.add(bodyMesh);
 
   /* ---- greenhouse: tapered glass loft with a dark interior block so the
-   * tinted canopy reads as glass over a cabin, not an empty shell */
-  const gh = [ // [z, halfWidth, y0, y1]
-    [-0.50, 0.88, 0.92, 1.00],
-    [-0.28, 0.82, 0.94, 1.24],
-    [-0.02, 0.72, 1.04, 1.37],
-    [0.55, 0.70, 1.07, 1.41],
-    [0.95, 0.74, 1.03, 1.33],
-    [1.20, 0.82, 0.94, 1.05],
-  ];
+   * tinted canopy reads as glass over a cabin, not an empty shell (the gh
+   * station table is variant-shaped above) */
   const cabin = new THREE.Mesh(
     loftSections(gh.map(([z, hw, y0, y1]) => superRing(0, (y0 + y1) / 2, z, hw, (y1 - y0) / 2, 2.6, N)), { capStart: true, capEnd: true }),
     glass
@@ -271,7 +301,45 @@ function buildCar(color, { player = false } = {}) {
   trimMesh.castShadow = true;
   g.add(trimMesh);
 
-  if (player) {
+  /* ---- variant-specific character parts ---- */
+  const acc = accentMat ?? dark;
+  if (variant === 1) { // muscle: hood scoop, side stripes, rear wing (always)
+    const scoop = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.08, 0.52), acc);
+    scoop.position.set(0, 0.90, -1.28);
+    const stripes = [];
+    const hipW = st[7][1]; // belt-peak half width (widened) + proud of the body
+    for (const sx of [-(hipW + 0.02), hipW + 0.02]) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 3.5), acc);
+      stripe.position.set(sx, 0.56, 0.12);
+      stripes.push(stripe);
+    }
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.09, 0.5), acc);
+    wing.position.set(0, 1.10, 1.92);
+    const finL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.42), acc);
+    finL.position.set(-0.72, 0.94, 1.92);
+    const finR = finL.clone(); finR.position.x = 0.72;
+    const muscleParts = new THREE.Mesh(mergeStaticMeshes([scoop, ...stripes, wing, finL, finR]), acc);
+    muscleParts.castShadow = true;
+    g.add(muscleParts);
+  } else if (variant === 2) { // rally: roof rails + forward light bar
+    const rackParts = [];
+    for (const rx of [-0.48, 0.48]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.05, 1.35), acc);
+      rail.position.set(rx, roofY + 0.05, 0.45);
+      rackParts.push(rail);
+    }
+    for (const px of [-0.42, -0.14, 0.14, 0.42]) {
+      const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.07, 10), dark);
+      pod.rotation.x = Math.PI / 2; // lens faces forward
+      pod.position.set(px, roofY + 0.06, -0.38);
+      rackParts.push(pod);
+    }
+    const rack = new THREE.Mesh(mergeStaticMeshes(rackParts), acc);
+    rack.castShadow = true;
+    g.add(rack);
+  }
+
+  if (player && variant !== 1) { // muscle already wears its wing
     const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 0.45), dark);
     spoiler.position.set(0, 1.05, 1.9);
     const finL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.3, 0.4), dark);
@@ -729,8 +797,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   racers.forEach((r, i) => {
     const isPlayer = r.isPlayer;
     const lane = isPlayer ? 2 : [1, 3, 0, 4][i - 1] ?? 1;
-    const color = isPlayer ? '#ff4757' : botColors[i % botColors.length];
-    const car = buildCar(color, { player: isPlayer });
+    const paint = r.paint ?? { primary: isPlayer ? '#ff4757' : botColors[i % botColors.length], secondary: null, variant: 0 };
+    const color = paint.primary ?? '#ff4757';
+    const car = buildCar(paint, { player: isPlayer });
     car.group.position.set(LANES[lane] ?? 0, 0, 0);
     // model already faces -Z (headlights at local -Z) — no rotation needed
     group.add(car.group);

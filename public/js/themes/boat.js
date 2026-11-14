@@ -56,9 +56,19 @@ const TOD = {
   },
 };
 
-function buildBoat(color, { player = false } = {}) {
+/* paint = { primary: hull, secondary: racing stripe/sponsons/cabin roof, variant } —
+ * variant 0 runabout · 1 hydro (wide sponson racer) · 2 cruiser (cabin) */
+function buildBoat(paint, { player = false } = {}) {
+  const P = typeof paint === 'string' ? { primary: paint, secondary: null, variant: 0 } : (paint ?? {});
+  const color = P.primary ?? '#ff4757';
+  const variant = P.variant ?? 0;
   const g = new THREE.Group();
+  // variant wrapper — label sprite rides on g, unscaled
+  const model = new THREE.Group();
+  g.add(model);
+  const add = (m) => model.add(m);
   const hullMat = new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.12, envMapIntensity: 0.7 });
+  const stripeMat = P.secondary ? new THREE.MeshStandardMaterial({ color: P.secondary, roughness: 0.35, metalness: 0.15, envMapIntensity: 0.6 }) : null;
   const deckMat = new THREE.MeshStandardMaterial({ color: '#e8dcc4', roughness: 0.9 });
   const darkMat = new THREE.MeshStandardMaterial({ color: '#20242c', roughness: 0.8 });
 
@@ -90,7 +100,7 @@ function buildBoat(color, { player = false } = {}) {
     hullMat
   );
   hullMesh.castShadow = true;
-  g.add(hullMesh);
+  add(hullMesh);
 
   // deck follows the sheer (crowned strips between the gunwales) — indexed
   // strip builder, one geometry, deckMat
@@ -116,7 +126,7 @@ function buildBoat(color, { player = false } = {}) {
   deckGeo.computeVertexNormals();
   const deckMesh = new THREE.Mesh(deckGeo, deckMat);
   deckMesh.castShadow = true;
-  g.add(deckMesh);
+  add(deckMesh);
 
   /* ---- dark trim: rub-rail tube along the sheer (both sides), outboard
    * motor (cowling + lower unit + tiller), windscreen frame, cleats — ONE
@@ -166,13 +176,13 @@ function buildBoat(color, { player = false } = {}) {
   }
   const trimMesh = new THREE.Mesh(mergeStaticMeshes(trimParts), darkMat);
   trimMesh.castShadow = true;
-  g.add(trimMesh);
+  add(trimMesh);
 
   // windscreen glass — tilted panel inside the frame
   const shield = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.30, 0.025), new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.1, transparent: true, opacity: 0.85, envMapIntensity: 1.2 }));
   shield.position.set(0, 0.95, -0.6);
   shield.rotation.x = -0.18;
-  g.add(shield);
+  add(shield);
 
   // console + bench seats on the deck (fore-aft cockpit layout)
   const seats = [];
@@ -189,7 +199,7 @@ function buildBoat(color, { player = false } = {}) {
   seats.push(bench1, bench2, benchBack, consoleBox);
   const seatsMesh = new THREE.Mesh(mergeStaticMeshes(seats), deckMat);
   seatsMesh.castShadow = true;
-  g.add(seatsMesh, wheel);
+  add(seatsMesh); add(wheel);
 
   // tiny driver seated on the aft bench
   const driver = new THREE.Group();
@@ -201,7 +211,7 @@ function buildBoat(color, { player = false } = {}) {
   helmet.position.y = 0.64;
   driver.add(torso, head, helmet);
   driver.position.set(0, 0.88, 0.62);
-  g.add(driver);
+  add(driver);
 
   // navigation lights (port red / starboard green) — shine at dusk/night
   const navMat = (c) => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.3 });
@@ -209,7 +219,7 @@ function buildBoat(color, { player = false } = {}) {
   navL.position.set(-0.62, 0.72, -1.55);
   const navR = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), navMat('#3ddc84'));
   navR.position.set(0.62, 0.72, -1.55);
-  g.add(navL, navR);
+  add(navL); add(navR);
 
   // only the player carries a real light (PLAN §1.2) — same contract as the
   // car. Rides ABOVE the deck so it reads as deck-lantern light; at deck
@@ -218,7 +228,7 @@ function buildBoat(color, { player = false } = {}) {
   if (player) {
     light = new THREE.PointLight('#ffeeb0', 0, 9, 2);
     light.position.set(0, 1.7, -1.6);
-    g.add(light);
+    add(light);
   }
 
   // wake: V-shaped foam trailing behind (+Z) — two diverging soft arms instead
@@ -255,7 +265,7 @@ function buildBoat(color, { player = false } = {}) {
   const wake = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 7), wakeMat);
   wake.rotation.x = -Math.PI / 2;
   wake.position.set(0, 0.455, 4.4);
-  g.add(wake);
+  add(wake);
 
   // contact shadow — dark radial footprint the hull casts on the water
   // (critic r5: boat had no contact shadow, motor crossed the waterline bare)
@@ -273,7 +283,7 @@ function buildBoat(color, { player = false } = {}) {
   );
   contact.rotation.x = -Math.PI / 2;
   contact.position.set(0, 0.44, 0.3);
-  g.add(contact);
+  add(contact);
 
   // r12 waterline foam ring (critic r11 LOW #9: idle hull read pasted onto
   // the surface) — a soft elliptical BAND hugging the hull sides, always on.
@@ -296,14 +306,57 @@ function buildBoat(color, { player = false } = {}) {
   const foam = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 5.9), foamMat);
   foam.rotation.x = -Math.PI / 2;
   foam.position.set(0, 0.428, 0.1);
-  g.add(foam);
+  add(foam);
 
   // combo spray: burst cone behind the boat
   const sprayMat = new THREE.MeshBasicMaterial({ color: '#bfeaff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
   const spray = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.4, 8), sprayMat);
   spray.rotation.x = Math.PI / 2;
   spray.position.set(0, 0.6, 3.0);
-  g.add(spray);
+  add(spray);
+
+  /* ---- livery stripe: a tube hugging the sheer below the rub-rail, both
+   * sides, in the SECONDARY color (runs the full length like real race boats) */
+  if (stripeMat) {
+    const stripeParts = [];
+    for (const side of [-1, 1]) {
+      const curve = new THREE.CatmullRomCurve3(
+        ST.map(([z, hg, , yg]) => new THREE.Vector3(side * (hg - 0.03), yg - 0.085, z))
+      );
+      stripeParts.push(new THREE.Mesh(new THREE.TubeGeometry(curve, 14, 0.045, 6), stripeMat));
+    }
+    const stripeMesh = new THREE.Mesh(mergeStaticMeshes(stripeParts), stripeMat);
+    stripeMesh.castShadow = true;
+    add(stripeMesh);
+  }
+
+  /* ---- hull variant ---- */
+  if (variant === 1) { // hydro — widened race hull with bow sponsons
+    model.scale.x = 1.12;
+    const podParts = [];
+    for (const sx of [-0.72, 0.72]) {
+      const pod = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.20, 1.3), stripeMat ?? hullMat);
+      pod.position.set(sx, 0.30, -1.35);
+      const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.30, 10), stripeMat ?? hullMat);
+      nose.rotation.z = Math.PI / 2;
+      nose.position.set(sx, 0.30, -2.0);
+      podParts.push(pod, nose);
+    }
+    const pods = new THREE.Mesh(mergeStaticMeshes(podParts), stripeMat ?? hullMat);
+    pods.castShadow = true;
+    add(pods);
+  } else if (variant === 2) { // cruiser — pillhouse cabin amidships
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.5, 1.15), stripeMat ?? deckMat);
+    cabin.position.set(0, 1.02, 0.3);
+    cabin.castShadow = true;
+    const cabinGlass = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.16, 0.92), darkMat);
+    cabinGlass.position.set(0, 1.14, 0.05);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.05, 1.2), deckMat);
+    roof.position.set(0, 1.28, 0.3);
+    add(cabin);
+    add(cabinGlass);
+    add(roof);
+  }
 
   return { group: g, wake, wakeMat, foamMat, spray, sprayMat, navL, navR, navMats: [navL.material, navR.material], light };
 }
@@ -627,8 +680,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   racers.forEach((r, i) => {
     const isPlayer = r.isPlayer;
     const lane = isPlayer ? 2 : [1, 3, 0, 4][i - 1] ?? 1;
-    const color = isPlayer ? '#ff4757' : botColors[i % botColors.length];
-    const boat = buildBoat(color, { player: isPlayer });
+    const paint = r.paint ?? { primary: isPlayer ? '#ff4757' : botColors[i % botColors.length], secondary: null, variant: 0 };
+    const color = paint.primary ?? '#ff4757';
+    const boat = buildBoat(paint, { player: isPlayer });
     boat.group.position.set(LANES[lane] ?? 0, 0, 0);
     group.add(boat.group);
 

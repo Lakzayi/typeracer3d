@@ -75,8 +75,18 @@ const TOD = {
   },
 };
 
-function buildHorse(color, { player = false } = {}) {
+/* paint = { primary: coat color, secondary: blanket/shirt, variant } —
+ * variant 0 warmblood · 1 racer (tall & lean) · 2 draft (heavy, feathered) */
+function buildHorse(paint, { player = false } = {}) {
+  const P = typeof paint === 'string' ? { primary: paint, secondary: null, variant: 0 } : (paint ?? {});
+  const color = P.primary ?? '#7a4a26';
+  const variant = P.variant ?? 0;
   const g = new THREE.Group();
+  // variant wrapper — the whole horse rescales without touching the name
+  // label sprite (which rides on g, not on model)
+  const model = new THREE.Group();
+  g.add(model);
+  const add = (m) => model.add(m); // everything below lands inside the wrapper
   const coat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, envMapIntensity: 0.05 });
   const maneMat = new THREE.MeshStandardMaterial({ color: '#2a2019', roughness: 1, envMapIntensity: 0.05 });
   const skin = new THREE.MeshStandardMaterial({ color: '#e6b98f', roughness: 0.9 });
@@ -123,7 +133,7 @@ function buildHorse(color, { player = false } = {}) {
     coat
   );
   coatMesh.castShadow = true;
-  g.add(coatMesh);
+  add(coatMesh);
 
   // eyes — two dark beads (read at chase-cam distance, give the head a face)
   const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.026, 6, 4), maneMat);
@@ -148,7 +158,7 @@ function buildHorse(color, { player = false } = {}) {
   maneParts.push(forelock);
   const maneMesh = new THREE.Mesh(mergeStaticMeshes(maneParts), maneMat);
   maneMesh.castShadow = true;
-  g.add(maneMesh);
+  add(maneMesh);
 
   /* ---- tail: docked bone (coat-less, dark) + three layered hair slabs that
    * fall with a slight rearward arc; hangs from the dock and swishes gently */
@@ -163,7 +173,7 @@ function buildHorse(color, { player = false } = {}) {
   tail.add(new THREE.Mesh(mergeStaticMeshes([new THREE.Mesh(tailBone), hairA, hairB, hairC]), maneMat));
   tail.position.set(0, 1.6, 1.1);
   tail.rotation.x = 0.2;
-  g.add(tail);
+  add(tail);
 
   /* ---- legs: tapered upper (with knee ball) + dark lower+hoof, two-segment
    * gait as before (§5.3) */
@@ -182,19 +192,20 @@ function buildHorse(color, { player = false } = {}) {
     lower.rotation.x = 0.3; // standing knee bend so the joint breaks the leg line (r9)
     leg.add(lower);
     leg.castShadow = true;
-    g.add(leg);
+    add(leg);
     legs.push(leg);
     lowers.push(lower);
   }
 
   /* ---- tack: blanket (rider shirt material — dims with the TOD together),
-   * saddle seat + pommel + cantle + girth ring + stirrups + reins */
-  const shirtMat = new THREE.MeshStandardMaterial({ color: player ? '#ffd75e' : '#3a4a6b', roughness: 0.9, envMapIntensity: 0.15 });
+   * saddle seat + pommel + cantle + girth ring + stirrups + reins.
+   * The blanket/shirt carries the livery's SECONDARY color. */
+  const shirtMat = new THREE.MeshStandardMaterial({ color: P.secondary ?? (player ? '#ffd75e' : '#3a4a6b'), roughness: 0.9, envMapIntensity: 0.15 });
   shirtMat.userData.base = shirtMat.color.clone(); // per-TOD dim (night fill below)
   const blanket = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.05, 0.66), shirtMat);
   blanket.position.set(0, 1.77, 0.12);
   blanket.castShadow = true;
-  g.add(blanket); // own draw (shirtMat is TOD-dimmed, so it can't join leather)
+  add(blanket); // own draw (shirtMat is TOD-dimmed, so it can't join leather)
   const seat = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.09, 0.5), leather);
   seat.position.set(0, 1.84, 0.14);
   const pommel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.09), leather);
@@ -219,7 +230,7 @@ function buildHorse(color, { player = false } = {}) {
   );
   const leatherMesh = new THREE.Mesh(mergeStaticMeshes(stirrupParts), leather);
   leatherMesh.castShadow = true;
-  g.add(leatherMesh);
+  add(leatherMesh);
 
   // rider (tiny cowboy) — sits ON the saddle now; arms reach the reins
   const rider = new THREE.Group();
@@ -242,7 +253,7 @@ function buildHorse(color, { player = false } = {}) {
   rider.add(torso, headR,
     new THREE.Mesh(mergeStaticMeshes([hatBrim, hatTop, armL, armR, legL, legR]), maneMat));
   rider.position.set(0, 1.86, 0.16);
-  g.add(rider);
+  add(rider);
 
   // player lantern — real light that lights the trail at night
   const lantern = new THREE.Group();
@@ -254,7 +265,7 @@ function buildHorse(color, { player = false } = {}) {
   const lanternLight = new THREE.PointLight('#ffbb55', 0, 9, 2);
   lantern.add(cage, lanternLight);
   lantern.position.set(-0.45, 2.12, 0.2);
-  g.add(lantern);
+  add(lantern);
 
   // dust puff behind hooves (speed) — grows with combo heat
   const dustTex = radialGlowTexture('#c9a76a');
@@ -262,7 +273,20 @@ function buildHorse(color, { player = false } = {}) {
   const dust = new THREE.Sprite(dustMat);
   dust.scale.set(2.4, 1.4, 1);
   dust.position.set(0, 0.5, 1.9);
-  g.add(dust);
+  add(dust);
+
+  /* ---- breed variant: rescale the whole model (label on g stays 1:1).
+   * racer — tall, lean, leggy · draft — heavy body + feathered lower legs */
+  if (variant === 1) {
+    model.scale.set(0.90, 1.06, 1.04);
+  } else if (variant === 2) {
+    model.scale.set(1.12, 0.98, 1.06);
+    for (const leg of legs) { // feather tufts above the hooves
+      const tuft = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.2, 0.13), maneMat);
+      tuft.position.set(0, -0.72, 0.02);
+      leg.add(tuft);
+    }
+  }
 
   return { group: g, legs, lowers, tail, dust, dustMat, lanternLight, cage, riderMats: [shirtMat, skin] };
 }
@@ -641,8 +665,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   racers.forEach((r, i) => {
     const isPlayer = r.isPlayer;
     const lane = isPlayer ? 2 : [1, 3, 0, 4][i - 1] ?? 1;
-    const color = isPlayer ? '#7a4a26' : botColors[(i - 1 + botColors.length) % botColors.length];
-    const horse = buildHorse(color, { player: isPlayer });
+    const paint = r.paint ?? { primary: isPlayer ? '#7a4a26' : botColors[(i - 1 + botColors.length) % botColors.length], secondary: null, variant: 0 };
+    const color = paint.primary ?? '#7a4a26';
+    const horse = buildHorse(paint, { player: isPlayer });
     horse.group.position.set(LANES[lane] ?? 0, 0, 0);
     group.add(horse.group);
 

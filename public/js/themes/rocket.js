@@ -148,8 +148,17 @@ function plumeAlphaTexture() {
   return tex;
 }
 
-function buildRocket(color, { player = false } = {}) {
+/* paint = { primary: fins/bands, secondary: nose cap + tail band, variant } —
+ * variant 0 classic booster · 1 stubby short-hauler · 2 needle interceptor */
+function buildRocket(paint, { player = false } = {}) {
+  const P = typeof paint === 'string' ? { primary: paint, secondary: null, variant: 0 } : (paint ?? {});
+  const color = P.primary ?? '#ff4757';
+  const variant = P.variant ?? 0;
   const g = new THREE.Group();
+  // variant wrapper — label sprite rides on g, unscaled
+  const model = new THREE.Group();
+  g.add(model);
+  const add = (m) => model.add(m);
   // r12/r13 (critic MED #3: the paint's env reflection overpowered the
   // sun-facing diffuse side): metalness 0.5→0.26, env 0.7→0.38, roughness
   // 0.46 — the SUN-side diffuse now clearly out-brightens any sky mirror; the
@@ -159,6 +168,8 @@ function buildRocket(color, { player = false } = {}) {
   });
   const accent = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.22, envMapIntensity: 0.6 });
   accent.userData.base = accent.color.clone(); // night dimming (fin saturation, r11 #12)
+  const accent2 = new THREE.MeshStandardMaterial({ color: P.secondary ?? '#e8e6e0', roughness: 0.4, metalness: 0.22, envMapIntensity: 0.6 });
+  accent2.userData.base = accent2.color.clone();
   const glass = new THREE.MeshStandardMaterial({ color: '#9fd8ff', roughness: 0.05, metalness: 0.8, transparent: true, opacity: 0.9, envMapIntensity: 1.0 });
 
   /* hull + ogive nose: ONE lathe — boat-tail flare at the engine, constant
@@ -171,7 +182,7 @@ function buildRocket(color, { player = false } = {}) {
   body.rotation.x = -Math.PI / 2; // +Y (profile up = nose) → -Z forward
   body.position.set(0, 1.3, 1.35); // engine end at +1.35, nose tip ≈ -2.27
   body.castShadow = true;
-  g.add(body);
+  add(body);
 
   // accent ring bands (merged into ONE mesh)
   const bandA = new THREE.Mesh(new THREE.CylinderGeometry(0.556, 0.556, 0.2, 16, 1, true), accent);
@@ -182,13 +193,13 @@ function buildRocket(color, { player = false } = {}) {
   const bandC = bandA.clone();
   bandC.scale.set(1, 0.5, 1);
   bandC.position.z = 0.95;
-  g.add(new THREE.Mesh(mergeStaticMeshes([bandA, bandB, bandC]), accent));
+  add(new THREE.Mesh(mergeStaticMeshes([bandA, bandB, bandC]), accent));
 
   // porthole — offset to the shell RADIUS so it actually shows (the old one
   // sat at 0.25 from the axis, fully buried inside the 0.55 body)
   const port = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), glass);
   port.position.set(0, 1.3 + 0.51, -0.55);
-  g.add(port);
+  add(port);
 
   // fins (rear, +Z) — extruded trapezoid planform with a BEVELED edge: real
   // airfoil-ish thickness instead of a flat board (r12 modeling mandate).
@@ -213,7 +224,7 @@ function buildRocket(color, { player = false } = {}) {
   }
   const finMesh = new THREE.Mesh(mergeStaticMeshes(fins), accent);
   finMesh.castShadow = true;
-  g.add(finMesh);
+  add(finMesh);
 
   // engine bell — lathe with a real bell curve (throat → expansion), sooty
   // metal with LOW env response (must not mirror the sky env, r7)
@@ -223,14 +234,14 @@ function buildRocket(color, { player = false } = {}) {
   const bell = new THREE.Mesh(new THREE.LatheGeometry(bellProfile, 14), new THREE.MeshStandardMaterial({ color: '#3a4048', roughness: 0.75, metalness: 0.6, envMapIntensity: 0.25, side: THREE.DoubleSide }));
   bell.rotation.x = Math.PI / 2; // opening aft (+Z)
   bell.position.set(0, 1.3, 1.36);
-  g.add(bell);
+  add(bell);
 
   // dark rear cap — the body's open rear face was catching full sun and
   // reading as the "burned white disc" behind the plume (critic r7); real
   // engine housings are dark matte metal
   const rearCap = new THREE.Mesh(new THREE.CircleGeometry(0.46, 14), new THREE.MeshStandardMaterial({ color: '#23262c', roughness: 0.85, metalness: 0.35, envMapIntensity: 0.25 }));
   rearCap.position.set(0, 1.3, 1.365);
-  g.add(rearCap);
+  add(rearCap);
 
   // exhaust — r12: soft VENTING VAPOR, not stacked cones (critic r11 LOW #4:
   // translucent beige cone with a crisp chevron seam). Two alpha-textured
@@ -243,7 +254,7 @@ function buildRocket(color, { player = false } = {}) {
   const jet = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.4, 5.2, 14, 1, true), jetMat);
   jet.rotation.x = Math.PI / 2; // narrow far end aft (+Y → +Z)
   jet.position.set(0, 1.3, 1.36 + 2.6);
-  g.add(jet);
+  add(jet);
   const jetCoreMat = new THREE.MeshBasicMaterial({
     color: '#fff1d8', map: plumeTex, transparent: true, opacity: 0.5,
     blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
@@ -251,7 +262,7 @@ function buildRocket(color, { player = false } = {}) {
   const jetCore = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.22, 2.4, 12, 1, true), jetCoreMat);
   jetCore.rotation.x = Math.PI / 2;
   jetCore.position.set(0, 1.3, 1.36 + 1.2);
-  g.add(jetCore);
+  add(jetCore);
 
   // nozzle glow sprite — small, dim: bloom, not a star (critic r2: ~10% burned).
   // r7: tighter still — the halo was swallowing the fins and lower body
@@ -262,7 +273,7 @@ function buildRocket(color, { player = false } = {}) {
   const jetGlow = new THREE.Sprite(jetGlowMat);
   jetGlow.scale.set(0.9, 0.9, 1);
   jetGlow.position.set(0, 1.3, 2.2);
-  g.add(jetGlow);
+  add(jetGlow);
 
   // bots: cheap longer exhaust smear (§5.4 budget alternative to a trail)
   let smearMat = null;
@@ -274,7 +285,7 @@ function buildRocket(color, { player = false } = {}) {
     const smear = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.3, 4.2, 12, 1, true), smearMat);
     smear.rotation.x = Math.PI / 2;
     smear.position.set(0, 1.3, 1.36 + 2.1);
-    g.add(smear);
+    add(smear);
   }
 
   // vapor trail — player only: 60-point ring buffer, additive colors fade to
@@ -292,7 +303,7 @@ function buildRocket(color, { player = false } = {}) {
     trail = new THREE.Points(geo, mat);
     trail.frustumCulled = false;
     trail.userData = { next: 0, since: 0 };
-    g.add(trail);
+    add(trail);
   }
 
   // only the player carries a real light (PLAN §1.2); intensity per TOD below
@@ -303,7 +314,7 @@ function buildRocket(color, { player = false } = {}) {
     // inverse-square blasted the cap/bell to cream-white — the "burned core"
     // was self-illumination, proven by the r7 probes (critic r7)
     light.position.set(0, 0.85, 4.4);
-    g.add(light);
+    add(light);
   }
 
   // hover shadow — cheap dark blob on the strip so the rocket doesn't float
@@ -324,7 +335,42 @@ function buildRocket(color, { player = false } = {}) {
   // offset opposite the day sun (upper-left-forward → shadow right-rear) so
   // the blob and the real shadows agree (critic r7)
   hover.position.set(0.4, 0.045, 0.75);
-  g.add(hover);
+  add(hover);
+
+  /* ---- SECONDARY accents: painted nose cap + aft band (two-tone livery) ---- */
+  const noseCap = new THREE.Mesh(new THREE.ConeGeometry(0.155, 0.5, 14), accent2);
+  noseCap.rotation.x = -Math.PI / 2; // points forward (-Z)
+  noseCap.position.set(0, 1.3, -2.18);
+  noseCap.castShadow = true;
+  add(noseCap);
+  const bandD = new THREE.Mesh(new THREE.CylinderGeometry(0.556, 0.556, 0.14, 16, 1, true), accent2);
+  bandD.rotation.x = Math.PI / 2;
+  bandD.position.set(0, 1.3, 1.06);
+  add(bandD);
+
+  /* ---- variant: rescale the model (label on g stays 1:1) ---- */
+  if (variant === 1) { // stubby — fat, short, twin side boosters
+    model.scale.set(1.14, 1.1, 0.85);
+    const boosterParts = [];
+    for (const bx of [-0.62, 0.62]) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 1.9, 10), accent2);
+      b.rotation.x = Math.PI / 2;
+      b.position.set(bx, 1.06, 0.8);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 10), accent);
+      tip.rotation.x = -Math.PI / 2;
+      tip.position.set(bx, 1.06, -0.35);
+      boosterParts.push(b, tip);
+    }
+    const boosters = new THREE.Mesh(mergeStaticMeshes(boosterParts), accent);
+    boosters.castShadow = true;
+    add(boosters);
+  } else if (variant === 2) { // needle — slender high-speed interceptor
+    model.scale.set(0.88, 0.92, 1.16);
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.7, 10), accent);
+    spike.rotation.x = -Math.PI / 2;
+    spike.position.set(0, 1.3, -2.62);
+    add(spike);
+  }
 
   return { group: g, jet, jetMat, jetCore, jetCoreMat, jetGlowMat, smearMat, trail, light, shellMat: shell, accentMat: accent };
 }
@@ -605,8 +651,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   racers.forEach((r, i) => {
     const isPlayer = r.isPlayer;
     const lane = isPlayer ? 2 : [1, 3, 0, 4][i - 1] ?? 1;
-    const color = isPlayer ? '#ff4757' : botColors[i % botColors.length];
-    const rocket = buildRocket(color, { player: isPlayer });
+    const paint = r.paint ?? { primary: isPlayer ? '#ff4757' : botColors[i % botColors.length], secondary: null, variant: 0 };
+    const color = paint.primary ?? '#ff4757';
+    const rocket = buildRocket(paint, { player: isPlayer });
     rocket.group.position.set(LANES[lane] ?? 0, 0, 0);
     group.add(rocket.group);
 

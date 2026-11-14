@@ -16,6 +16,7 @@ import { demoRace } from './demo-data.js';
 import { getGhost, maybeSaveGhost, ghostLogFor } from './ghost.js';
 import { dailyRace, dailyState, markDailyDone, todayStr } from './daily.js';
 import { check as checkAchievements, renderAchievements } from './achievements.js';
+import { paintFor, GARAGE_DEFAULTS, PAINTS } from './paints.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -91,6 +92,10 @@ hud.els.soundBtn.addEventListener('click', () => {
 
 /* ---------------- menu ---------------- */
 
+/* the racer list the CURRENT on-screen theme was built with — garage edits
+ * repaint its player vehicle live (menu backdrop doubles as the garage view) */
+let themeRacers = [{ name: 'YOU', isPlayer: true, paint: null }];
+
 function buildThemeCards() {
   hud.els.themeCards.innerHTML = '';
   for (const t of Object.values(THEMES)) {
@@ -99,11 +104,112 @@ function buildThemeCards() {
     card.innerHTML = `<div class="ic">${t.icon}</div><div class="nm">${t.name}</div><div class="st">${t.status === 'soon' ? 'SOON' : '3D · PLAY'}</div>`;
     card.addEventListener('click', () => {
       if (t.status === 'soon') { hud.toast(`${t.icon} ${t.name} — ${t.blurb}`); return; }
+      if (currentThemeId === t.id) return;
       currentThemeId = t.id;
+      themeRacers = [{ name: 'YOU', isPlayer: true, paint: null }];
       buildThemeCards();
+      renderGarage();
+      rebuildIdleTheme();
     });
     hud.els.themeCards.appendChild(card);
   }
+}
+
+/* ---------- garage: YOUR model + two-tone paint, per theme ---------- */
+
+const GHOST_PAINT = { primary: '#dfe7f2', secondary: '#8fb0ff', variant: 0 }; // spectre livery
+
+const VARIANT_INFO = {
+  car: [
+    { name: 'GT', desc: 'balanced coupe' },
+    { name: 'Muscle', desc: 'wide, scooped, big wing' },
+    { name: 'Rally', desc: 'lifted, roof light bar' },
+  ],
+  horse: [
+    { name: 'Warmblood', desc: 'balanced trail horse' },
+    { name: 'Racer', desc: 'tall, lean, leggy' },
+    { name: 'Draft', desc: 'heavy, feathered legs' },
+  ],
+  boat: [
+    { name: 'Runabout', desc: 'classic speedboat' },
+    { name: 'Hydro', desc: 'wide sponson racer' },
+    { name: 'Cruiser', desc: 'cabin cruiser' },
+  ],
+  rocket: [
+    { name: 'Classic', desc: 'balanced booster' },
+    { name: 'Stubby', desc: 'fat twin-booster hauler' },
+    { name: 'Needle', desc: 'slender interceptor' },
+  ],
+};
+
+/* the player's paint for a theme — garage overrides over curated defaults */
+function playerPaint(themeId) {
+  return { ...GARAGE_DEFAULTS[themeId], ...(settings.garage?.[themeId] ?? {}), variant: settings.garage?.[themeId]?.model ?? 0 };
+}
+
+function setGarage(patch) {
+  settings.garage = settings.garage ?? {};
+  settings.garage[currentThemeId] = {
+    ...GARAGE_DEFAULTS[currentThemeId], ...(settings.garage[currentThemeId] ?? {}), ...patch,
+  };
+  saveSettings();
+  renderGarage();
+  rebuildIdleTheme(); // the menu backdrop IS the preview
+}
+
+function renderGarage() {
+  const info = VARIANT_INFO[currentThemeId] ?? [];
+  const themeDef = THEMES[currentThemeId];
+  $('garageThemeName').textContent = themeDef ? themeDef.name : '';
+  const g = settings.garage?.[currentThemeId] ?? {};
+  const model = g.model ?? 0;
+  $('garageModels').innerHTML = info.map((v, i) =>
+    `<button class="garageModel${i === model ? ' active' : ''}" data-i="${i}"><b>${v.name}</b><small>${v.desc}</small></button>`
+  ).join('');
+  const list = (PAINTS[currentThemeId] ?? PAINTS.car).list;
+  const primaries = [...new Set(list.map((p) => p.primary))];
+  const secondaries = [...new Set(list.map((p) => p.secondary))];
+  const sw = (colors, cur) => colors.map((c) =>
+    `<button class="swatch${c.toLowerCase() === (cur ?? '').toLowerCase() ? ' active' : ''}" data-c="${c}" style="background:${c}"></button>`
+  ).join('');
+  $('garagePrimary').innerHTML = sw(primaries, g.primary ?? GARAGE_DEFAULTS[currentThemeId].primary);
+  $('garageSecondary').innerHTML = sw(secondaries, g.secondary ?? GARAGE_DEFAULTS[currentThemeId].secondary);
+}
+
+$('garageModels').addEventListener('click', (e) => {
+  const b = e.target.closest('.garageModel');
+  if (b) setGarage({ model: Number(b.dataset.i) });
+});
+$('garagePrimary').addEventListener('click', (e) => {
+  const b = e.target.closest('.swatch');
+  if (b) setGarage({ primary: b.dataset.c });
+});
+$('garageSecondary').addEventListener('click', (e) => {
+  const b = e.target.closest('.swatch');
+  if (b) setGarage({ secondary: b.dataset.c });
+});
+$('garageRandom').addEventListener('click', () => {
+  const list = (PAINTS[currentThemeId] ?? PAINTS.car).list;
+  const p = list[Math.floor(Math.random() * list.length)];
+  setGarage({ ...p, model: Math.floor(Math.random() * (VARIANT_INFO[currentThemeId]?.length ?? 3)) });
+});
+
+/* rebuild the on-screen theme with the current paints (same scenery seed —
+ * only the vehicles change, so garage edits feel instant) */
+function rebuildIdleTheme() {
+  if (!THEMES[currentThemeId] || THEMES[currentThemeId].status === 'soon') return;
+  if (!world) world = new World($('scene'));
+  world.finishMode = false;
+  world.focusIdx = 0;
+  const racers = themeRacers.map((r) =>
+    r.isPlayer ? { ...r, paint: playerPaint(currentThemeId) }
+      : r.isGhost ? { ...r, paint: GHOST_PAINT }
+      : r
+  );
+  const theme = THEMES[currentThemeId].create(world, {
+    racers, seed: hashSeed('idle:' + currentThemeId), timeOfDay: settings.timeOfDay,
+  });
+  world.setTheme(theme);
 }
 
 /* ---------------- game mode cards (7 modes) ---------------- */
@@ -334,14 +440,19 @@ async function startRaceFlow() {
   world.finishMode = false;
   world.focusIdx = 0;
 
-  const racers = [{ name: 'YOU', isPlayer: true }];
-  // bots from the real race (same order the controller derives)
+  const racers = [{ name: 'YOU', isPlayer: true, paint: playerPaint(currentThemeId) }];
+  // bots from the real race (same order the controller derives) — each rolls a
+  // random model + livery, seeded by THIS race id so replays look identical
   const replaced = myName ? raceData.racers.find((r) => r.name.toLowerCase() === myName.toLowerCase()) : null;
   for (const r of raceData.racers) {
     if (racers.length >= 5) break;
     if (replaced && r.name === replaced.name) continue;
-    racers.push({ name: r.name, isPlayer: false });
+    racers.push({
+      name: r.name, isPlayer: false,
+      paint: r.isGhost ? GHOST_PAINT : paintFor(currentThemeId, (raceData.id || '') + '|' + r.name),
+    });
   }
+  themeRacers = racers; // garage edits repaint this lineup live on the menu
 
   const themeDef = THEMES[currentThemeId];
   const theme = themeDef.create(world, {
@@ -573,6 +684,8 @@ buildThemeCards();
 renderStatsPanel();
 renderAchievements();
 renderDaily();
+rebuildIdleTheme(); // menu backdrop = a live parked view of YOUR garage ride
+renderGarage();
 requestAnimationFrame(loop);
 
 /* debug/test handle (also handy in devtools) */
