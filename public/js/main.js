@@ -174,6 +174,11 @@ function renderGarage() {
   ).join('');
   $('garagePrimary').innerHTML = sw(primaries, g.primary ?? GARAGE_DEFAULTS[currentThemeId].primary);
   $('garageSecondary').innerHTML = sw(secondaries, g.secondary ?? GARAGE_DEFAULTS[currentThemeId].secondary);
+  // compact strip on the menu: name + two paint dots
+  $('garageMiniLabel').textContent = `${themeDef ? themeDef.name : ''} · ${info[model]?.name ?? 'stock'}`;
+  $('garageMiniDots').innerHTML =
+    `<i style="background:${g.primary ?? GARAGE_DEFAULTS[currentThemeId].primary}"></i>` +
+    `<i style="background:${g.secondary ?? GARAGE_DEFAULTS[currentThemeId].secondary}"></i>`;
 }
 
 $('garageModels').addEventListener('click', (e) => {
@@ -193,6 +198,38 @@ $('garageRandom').addEventListener('click', () => {
   const p = list[Math.floor(Math.random() * list.length)];
   setGarage({ ...p, model: Math.floor(Math.random() * (VARIANT_INFO[currentThemeId]?.length ?? 3)) });
 });
+
+/* full-screen garage showroom — a separate page: just YOUR ride on the track
+ * under a slow beauty orbit, controls in a glass sheet at the bottom */
+let garageOpen = false;
+let garageSavedLineup = null;
+
+function openGarage() {
+  if (phase !== 'menu' || garageOpen) return;
+  garageOpen = true;
+  garageSavedLineup = themeRacers;
+  themeRacers = [{ name: 'YOU', isPlayer: true, paint: null }];
+  hud.els.menu.classList.add('hidden');
+  $('garageView').classList.remove('hidden');
+  world.showcase = true;
+  world.orbitT = Math.PI * 0.65; // open facing the nose, not the tail
+  renderGarage();
+  rebuildIdleTheme();
+}
+
+function closeGarage() {
+  if (!garageOpen) return;
+  garageOpen = false;
+  $('garageView').classList.add('hidden');
+  world.showcase = false;
+  themeRacers = garageSavedLineup ?? [{ name: 'YOU', isPlayer: true, paint: null }];
+  garageSavedLineup = null;
+  hud.els.menu.classList.remove('hidden');
+  rebuildIdleTheme(); // back to the parked menu lineup
+}
+
+$('garageOpenBtn').addEventListener('click', openGarage);
+$('garageBackBtn').addEventListener('click', closeGarage);
 
 /* rebuild the on-screen theme with the current paints (same scenery seed —
  * only the vehicles change, so garage edits feel instant) */
@@ -331,7 +368,10 @@ function backToMenu() {
 
 window.addEventListener('keydown', (e) => {
   const inTyping = e.target && e.target.id === 'typeInput';
-  if (e.key === 'Escape' && (phase === 'racing' || phase === 'countdown')) backToMenu();
+  if (e.key === 'Escape') {
+    if (garageOpen) closeGarage();
+    else if (phase === 'racing' || phase === 'countdown') backToMenu();
+  }
   // live day/night toggle (never while typing the race text!)
   if ((e.key === 'n' || e.key === 'N') && !inTyping && world?.theme?.setTimeOfDay) {
     const order = ['day', 'sunset', 'night'];
@@ -673,7 +713,7 @@ function loop(t) {
       hud.updateCombo(typing.combo);
     }
   } else if (world.theme) {
-    world.update(dt, world.theme.vehicles.map((v) => ({ progress01: 0, speed01: 0, wpm: 0 })));
+    world.update(dt, world.theme.vehicles.map((v) => ({ progress01: 0, speed01: 0, wpm: 0, hideLabel: true })));
   }
 
   world.render();

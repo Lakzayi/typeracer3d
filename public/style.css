@@ -511,17 +511,79 @@ body {
 .menuBadge.err { color: var(--red); }
 .credits { margin-top: 8px; text-align: center; font-size: 10.5px; color: var(--faint); letter-spacing: 0.02em; }
 
-/* ── garage — player vehicle model & paint ── */
-.garagePanel { margin-bottom: 18px; padding: 16px 22px 14px; border-radius: var(--r-lg); }
-.garageTheme { color: var(--cyan); text-transform: none; letter-spacing: 0.02em; }
-#garageRandom {
-  padding: 5px 13px; border-radius: 999px; cursor: pointer;
-  font-family: var(--font); font-size: 10.5px; font-weight: 650; color: var(--dim);
-  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+/* ── garage — menu strip button + full-screen showroom ── */
+.garageOpenBtn {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  margin-bottom: 18px; padding: 13px 20px; cursor: pointer;
+  border-radius: var(--r-lg); text-align: left; font-family: var(--font);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(90, 209, 255, 0.3);
+  box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: transform 0.25s var(--spring), border-color 0.25s, background 0.25s;
 }
-#garageRandom:hover { color: var(--text); border-color: rgba(90, 209, 255, 0.4); background: rgba(90, 209, 255, 0.08); }
-.garageModels { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+@supports (backdrop-filter: url('#lg-card')) {
+  .garageOpenBtn { backdrop-filter: url('#lg-card') blur(3px) saturate(165%) brightness(1.22); -webkit-backdrop-filter: none; }
+}
+.garageOpenBtn:hover { transform: translateY(-2px); border-color: rgba(90, 209, 255, 0.55); background: rgba(90, 209, 255, 0.08); }
+.garageOpenBtn .gIc { font-size: 22px; }
+.garageOpenBtn .gTx { flex: 1; min-width: 0; }
+.garageOpenBtn .gTx b { display: block; font-size: 14px; font-weight: 750; letter-spacing: -0.01em; }
+.garageOpenBtn .gTx small { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.garageOpenBtn .gDots { display: flex; gap: 5px; }
+.garageOpenBtn .gDots i {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.3);
+}
+.garageOpenBtn .gGo {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.1em; color: #0b0f1a;
+  padding: 8px 14px; border-radius: 10px;
+  background: linear-gradient(120deg, #5ad1ff, #8b7bff);
+  box-shadow: 0 4px 14px rgba(90, 209, 255, 0.35);
+}
+
+/* showroom — the live 3D vehicle orbits behind, controls in a glass sheet */
+#garageView {
+  position: fixed; inset: 0; z-index: 25;
+  display: flex; flex-direction: column;
+  animation: riseIn 0.45s var(--spring);
+}
+#garageView::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(4, 6, 13, 0.62), transparent 30%, transparent 52%, rgba(4, 6, 13, 0.72));
+}
+#garageView.hidden { display: none; }
+.gvHeader {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; gap: 14px; padding: 16px 22px;
+}
+.gvHeader h2 {
+  flex: 1; margin: 0; text-align: center;
+  font-size: 16px; font-weight: 800; letter-spacing: -0.01em; color: var(--text);
+}
+.gvHeader #garageBackBtn, .gvHeader #garageRandom {
+  padding: 9px 16px; border-radius: 12px; cursor: pointer;
+  font-family: var(--font); font-size: 12px; font-weight: 700; color: var(--text);
+  background: rgba(10, 15, 31, 0.55); border: 1px solid rgba(255, 255, 255, 0.16);
+  transition: background 0.2s, border-color 0.2s;
+}
+.gvHeader #garageBackBtn:hover { border-color: rgba(255, 255, 255, 0.4); }
+.gvHeader #garageRandom:hover { border-color: rgba(90, 209, 255, 0.5); }
+.garageTheme { color: var(--cyan); }
+.gvSpacer { flex: 1; position: relative; }
+.gvPanel {
+  position: relative; z-index: 1;
+  width: min(640px, calc(100% - 44px)); align-self: center;
+  margin-bottom: 26px; padding: 18px 22px 16px; border-radius: var(--r-lg);
+}
+.gvSection { margin-bottom: 14px; }
+.gvSection label, .gcRow label {
+  display: block; margin-bottom: 8px;
+  font-size: 9.5px; font-weight: 750; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--faint);
+}
+.garageModels { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .garageModel {
   position: relative; padding: 11px 14px; border-radius: 12px; cursor: pointer; text-align: left;
   background: rgba(255, 255, 255, 0.045); border: 1px solid rgba(255, 255, 255, 0.12);
@@ -542,12 +604,9 @@ body {
 }
 .garageModel b { display: block; font-size: 12.5px; font-weight: 750; }
 .garageModel small { display: block; font-size: 10px; color: var(--faint); margin-top: 2px; }
-.garageColors { display: grid; gap: 8px; }
+.garageColors { display: grid; gap: 10px; margin-top: 4px; }
 .gcRow { display: flex; align-items: center; gap: 12px; }
-.gcRow label {
-  width: 72px; flex: none; font-size: 9.5px; font-weight: 750;
-  letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint);
-}
+.gcRow label { width: 80px; flex: none; margin-bottom: 0; }
 .swatches { display: flex; flex-wrap: wrap; gap: 7px; }
 .swatch {
   width: 26px; height: 26px; border-radius: 50%; cursor: pointer; padding: 0;
@@ -560,7 +619,10 @@ body {
   border-color: var(--cyan);
   box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.25), inset 0 2px 4px rgba(255, 255, 255, 0.25);
 }
-.garageHint { margin-top: 12px; font-size: 10.5px; color: var(--faint); text-align: center; }
+.garageHint { margin-top: 14px; font-size: 10.5px; color: var(--faint); text-align: center; }
+@media (max-width: 760px) {
+  .gvPanel { width: calc(100% - 24px); margin-bottom: 14px; padding: 14px 16px 12px; }
+}
 
 /* ── daily challenge banner ── */
 .dailyBanner {

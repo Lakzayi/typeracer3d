@@ -624,7 +624,9 @@ export function stepVehicle(v, rs, dt, now, opts = {}) {
   v.labelTimer = (v.labelTimer ?? 1) + dt;
   if (v.labelTimer > 0.35) {
     v.labelTimer = 0;
-    v.updateLabel?.(
+    // parked previews (menu / garage) hide the HUD readout — name only
+    if (rs.hideLabel) v.updateLabel?.('', '');
+    else v.updateLabel?.(
       `${Math.round(rs.wpm ?? 0)} wpm`,
       rs.finished ? 'finished' : `${Math.round(rs.progress01 * 100)}%`
     );

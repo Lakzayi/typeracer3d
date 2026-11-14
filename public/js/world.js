@@ -97,6 +97,7 @@ export class World {
     this._sc = new THREE.Vector3(1, 1, 1);
     this.orbitT = 0;
     this.finishMode = false;
+    this.showcase = false; // garage: slow beauty orbit around a lone vehicle
     this.confetti = null;
 
     this._streaks = this._makeStreaks();
@@ -284,13 +285,14 @@ export class World {
     }
 
     // camera (targets written into reused vectors — no per-frame alloc)
-    if (this.finishMode) {
-      this.orbitT += dt * 0.55;
-      const r = 9.5;
+    if (this.finishMode || this.showcase) {
+      const showcase = this.showcase;
+      this.orbitT += dt * (showcase ? 0.3 : 0.55);
+      const r = showcase ? 6.4 : 9.5;
       const tx = carPos.x + Math.cos(this.orbitT) * r;
       const tz = carPos.z + Math.sin(this.orbitT) * r;
-      this._v1.set(tx, 4.2, tz);
-      this._v2.set(carPos.x, 1.1, carPos.z);
+      this._v1.set(tx, showcase ? 2.5 : 4.2, tz);
+      this._v2.set(carPos.x, 1.0, carPos.z);
       this.camPos.lerp(this._v1, expK(2.4, dt));
       this.camLook.lerp(this._v2, expK(3.5, dt));
     } else {
