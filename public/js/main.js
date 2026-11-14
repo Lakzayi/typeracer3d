@@ -462,7 +462,13 @@ async function startRaceFlow() {
       hud.menuBadge(`🎯 ${$('drillType').value} drill — generating…`);
       raceData = drillRace($('drillType').value);
     } else if (mode === 'custom') {
-      const raw = ($('customText').value || '').replace(/\s+/g, ' ').trim();
+      // keep line breaks! paragraphs are typed with Enter — only collapse
+      // space runs and dead space around the breaks
+      const raw = ($('customText').value || '')
+        .replace(/[ \t]+/g, ' ')
+        .split('\n').map((l) => l.trim()).join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
       if (raw.length < 20) {
         hud.menuBadge('✗ write at least 20 characters of text first (custom mode)', true);
         hud.setStartBusy(false);
@@ -568,6 +574,9 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
     onFinish: () => { hud.updateCombo(0); },
   });
   typing.mode = settings.typingMode;
+  // one normalization at the source: race.textLen and the typing engine must
+  // see the SAME string (CRLF paste would otherwise inflate the track length)
+  raceData.text = String(raceData.text ?? '').replace(/\r\n?/g, '\n');
   typing.setText(raceData.text);
   typing.disable();
 

@@ -42,9 +42,12 @@ export class TypingEngine {
   setText(text) {
     // normalize to what a physical keyboard can type: unicode dashes (em/en,
     // figure, minus…) arrive in TypeRacer/Monkeytype quotes but no layout
-    // produces them — same for curly quotes and nbsp. Every swap is 1:1 so
-    // the length (and the controller's progress math on race.text) holds.
+    // produces them — same for curly quotes and nbsp. Windows paste (\r\n)
+    // becomes a plain \n so Enter can be typed. Every swap is 1:1 (CRLF→LF
+    // is normalized at the race source too) so the length — and the
+    // controller's progress math on race.text — holds.
     this.text = text
+      .replace(/\r\n?/g, '\n')
       .replace(/[—–―‒−]/g, '-')
       .replace(/['’‚]/g, "'")
       .replace(/[“”„]/g, '"')
@@ -60,6 +63,7 @@ export class TypingEngine {
     for (let i = 0; i < this.text.length; i++) {
       const s = document.createElement('span');
       s.textContent = this.text[i];
+      if (this.text[i] === '\n') s.dataset.nl = '1'; // ⏎ marker, styled in CSS
       s.className = i === 0 ? 'caret' : 'todo';
       frag.appendChild(s);
       this.spans.push(s);
@@ -95,7 +99,12 @@ export class TypingEngine {
       return;
     }
 
-    if (key.length !== 1) return; // ignore Shift, arrows, etc.
+    /* Enter only ever types a paragraph break, and only when the text
+     * expects one — a stray Enter is a silent no-op, never an accidental
+     * error that realistic mode would then demand a backspace for */
+    if (key === 'Enter') {
+      if (this.text[this.pos] !== '\n') return;
+    } else if (key.length !== 1) return; // ignore Shift, arrows, etc.
     e.preventDefault(); // keep space from scrolling, ' from quick-find
     if (this.finishedAt) return;
 
@@ -104,7 +113,7 @@ export class TypingEngine {
       this.hooks.onStart && this.hooks.onStart();
     }
 
-    const ch = key;
+    const ch = key === 'Enter' ? '\n' : key;
     const expected = this.text[this.pos];
 
     if (!this.blocked && ch === expected) {
@@ -131,7 +140,7 @@ export class TypingEngine {
       this.combo = 0;
       this.buffer.push(ch);
       const el = document.createElement('span');
-      el.textContent = ch;
+      el.textContent = ch === '\n' ? '⏎' : ch; // a wrong Enter must be visible
       el.className = 'bufferChar';
       this.spans[this.pos].insertAdjacentElement('beforebegin', el);
       this.bufferEls.push(el);

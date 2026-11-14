@@ -248,6 +248,12 @@ body {
   background: rgba(255, 92, 107, 0.85); color: #fff; border-radius: 4px;
   text-decoration: line-through; text-decoration-thickness: 2px;
 }
+/* paragraph breaks are typed with Enter — mark the spot so it's obvious */
+#typingText span[data-nl]::before {
+  content: '⏎';
+  opacity: 0.4;
+  font-size: 0.8em;
+}
 @keyframes caretPop { from { box-shadow: 0 0 22px rgba(90, 209, 255, 1); } }
 
 #typeInput {
