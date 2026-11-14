@@ -40,7 +40,15 @@ export class TypingEngine {
   }
 
   setText(text) {
-    this.text = text;
+    // normalize to what a physical keyboard can type: unicode dashes (em/en,
+    // figure, minus…) arrive in TypeRacer/Monkeytype quotes but no layout
+    // produces them — same for curly quotes and nbsp. Every swap is 1:1 so
+    // the length (and the controller's progress math on race.text) holds.
+    this.text = text
+      .replace(/[—–―‒−]/g, '-')
+      .replace(/['’‚]/g, "'")
+      .replace(/[“”„]/g, '"')
+      .replace(/\u00A0/g, ' ');
     this.pos = 0; this.correct = 0; this.errors = 0;
     this.buffer = []; this.bufferEls = [];
     this.combo = 0; this.maxCombo = 0; this._nextMilestone = 0;
@@ -49,9 +57,9 @@ export class TypingEngine {
     this.textEl.innerHTML = '';
     this.spans = [];
     const frag = document.createDocumentFragment();
-    for (let i = 0; i < text.length; i++) {
+    for (let i = 0; i < this.text.length; i++) {
       const s = document.createElement('span');
-      s.textContent = text[i];
+      s.textContent = this.text[i];
       s.className = i === 0 ? 'caret' : 'todo';
       frag.appendChild(s);
       this.spans.push(s);
