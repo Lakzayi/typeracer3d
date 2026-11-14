@@ -22,20 +22,16 @@ const CODE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no 0/o/1/i/l lookali
 const SELF_SNAP_MS = 150;  // how often a client streams its progress
 const BROADCAST_MS = 120;  // how often the host rebroadcasts the merged snapshot
 
-/* ICE/TURN — STUN alone only works when at least one NAT is friendly. Two
- * players behind strict/symmetric NATs (typical on mobile/corporate ISPs)
- * finish signaling yet never open the data channel: from the joiner that
- * looks like a timeout. Free public relays (openrelay project) cover that;
- * ICE simply discards any relay it can't reach. ?turn= or localStorage
- * tr3d_turn adds a self-hosted coturn, format user:pass@host:port. */
-const OPENRELAY = { username: 'openrelayproject', credential: 'openrelayproject' };
+/* ICE/TURN — STUN covers the common case (one friendly NAT). When BOTH
+ * sides sit behind strict/symmetric NATs, only a TURN relay can join them.
+ * The free public relays (openrelay etc.) were probed and are unreachable —
+ * dead relays actively hurt: NonTrickleICE stalls on gathering for seconds.
+ * So the defaults ship STUN-only; if you have a real relay (metered.ca free
+ * API or your own coturn), pass it via ?turn= or localStorage tr3d_turn,
+ * format user:pass@host:port. */
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:global.stun.twilio.com:3478' },
-  { urls: 'turn:openrelay.metered.ca:80', ...OPENRELAY },
-  { urls: 'turn:openrelay.metered.ca:80?transport=tcp', ...OPENRELAY },
-  { urls: 'turn:openrelay.metered.ca:443', ...OPENRELAY },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', ...OPENRELAY },
 ];
 
 function iceConfig() {
