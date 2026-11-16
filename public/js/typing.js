@@ -75,6 +75,23 @@ export class TypingEngine {
   enable() { this.enabled = true; }
   disable() { this.enabled = false; }
 
+  /* mp death mode: one wrong key throws you back to the start line —
+   * progress, combo and the WPM log restart, lifetime errors stay. The
+   * clock is NOT reset: reset runs pay for themselves in finish time. */
+  resetToStart() {
+    this.pos = 0;
+    this.correct = 0;
+    this.combo = 0;
+    this._nextMilestone = 0;
+    this.hits = [];
+    this.buffer = [];
+    this.bufferEls.forEach((el) => el.remove());
+    this.bufferEls = [];
+    for (const s of this.spans) if (s.className !== 'todo') s.className = 'todo';
+    this._paintCaret();
+    this.textEl.scrollTop = 0;
+  }
+
   /* virtual clock: excludes paused wall-clock time so a mid-race pause never
    * pollutes the keystroke log, the WPMs, or the saved ghost */
   pause() { if (this.startedAt && this.pauseStart == null) this.pauseStart = performance.now(); }

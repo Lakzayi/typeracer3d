@@ -542,7 +542,7 @@ async function startRaceFlow() {
 
 /* shared tail of every race path (solo / bot / challenge / multiplayer):
  * world + theme lineup, typing engine, controller, HUD, countdown, GO */
-async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = null }) {
+async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = null, mpDeath = false }) {
   // --- world + theme ---
   if (!world) world = new World($('scene'));
   world.finishMode = false;
@@ -598,7 +598,7 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
 
   // --- controller ---
   if (race) race.dispose();
-  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode });
+  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode, mpDeath });
 
   // --- hud ---
   const colors = racers.map((r, i) => theme.vehicles[i]?.color ?? '#2e86ff');
@@ -806,10 +806,12 @@ $('shareCardBtn').addEventListener('click', async () => {
 let mpOpen = false;
 let mpBusy = false;
 let mpAcked = false; // client: the host's roster broadcast confirmed our hello
+let mpDeathOn = false; // 💀 death mode: a mistake throws you back to the start line
 
 /* host picks (or a 'start' carries) an environment — everyone rebuilds the
  * same world, so the lobby preview AND the race look identical everywhere */
-function applyMpEnv(theme, tod) {
+function applyMpEnv(theme, tod, death) {
+  if (death !== undefined) mpDeathOn = !!death;
   if (race || phase !== 'menu') return; // never re-theme mid-race
   let changed = false;
   if (theme && THEMES[theme]?.status === 'live' && theme !== currentThemeId) {
@@ -852,7 +854,8 @@ function updateMpEnvLine() {
   el.classList.toggle('hidden', !show);
   if (show) {
     const t = THEMES[currentThemeId];
-    el.textContent = `🗺 environment: ${t?.icon ?? ''} ${t?.name ?? currentThemeId} · ${settings.timeOfDay} — the host's choice`;
+    el.textContent = `🗺 environment: ${t?.icon ?? ''} ${t?.name ?? currentThemeId} · ${settings.timeOfDay} — the host's choice`
+      + (mpDeathOn ? ' · 💀 death mode ON' : '');
   }
 }
 
@@ -909,6 +912,7 @@ function showMpWait() {
     // is already showing it, so guests joining see exactly this
     $('mpEnvTheme').value = currentThemeId;
     $('mpEnvTod').value = settings.timeOfDay;
+    $('mpDeathMode').checked = mpDeathOn;
   } else {
     updateMpEnvLine();
   }
@@ -983,7 +987,7 @@ async function mpHostStart() {
     }
     setMpStatus('');
     // the host's environment travels with the start (late joiners included)
-    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay });
+    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay, death: mpDeathOn });
     await mpLaunch({ text, source, raceId });
   } catch (e) {
     setMpStatus('could not start: ' + e.message, true);
@@ -1009,7 +1013,7 @@ async function mpLaunch({ text, source, raceId }) {
           ? { ...GARAGE_DEFAULTS[currentThemeId], ...p.garage[currentThemeId], variant: p.garage[currentThemeId].model ?? 0 }
           : null,
       })),
-  }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null });
+  }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null, mpDeath: mpDeathOn });
 }
 
 /* fresh self state read at SEND time (background tabs throttle rAF — the
@@ -1033,12 +1037,12 @@ mpOn('players', () => {
   }
   rebuildRoomLineup(); // lobby backdrop = the live room lineup
 });
-mpOn('env', ({ theme, tod }) => {
-  applyMpEnv(theme, tod);
+mpOn('env', ({ theme, tod, death }) => {
+  applyMpEnv(theme, tod, death);
   updateMpEnvLine();
 });
 mpOn('start', (msg) => {
-  applyMpEnv(msg.theme, msg.tod); // belt-and-braces: late joiners still match
+  applyMpEnv(msg.theme, msg.tod, msg.death); // belt-and-braces: late joiners still match
   mpLaunch(msg);
 });
 mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
@@ -1082,12 +1086,14 @@ $('mpStartBtn').addEventListener('click', mpHostStart);
  * change applies locally through the SAME 'env' path guests use */
 const mpPushEnv = () => {
   const theme = $('mpEnvTheme').value, tod = $('mpEnvTod').value;
-  applyMpEnv(theme, tod);
-  mpSendEnv(theme, tod);
+  const death = $('mpDeathMode').checked;
+  applyMpEnv(theme, tod, death);
+  mpSendEnv(theme, tod, death);
   updateMpEnvLine();
 };
 $('mpEnvTheme').addEventListener('change', mpPushEnv);
 $('mpEnvTod').addEventListener('change', mpPushEnv);
+$('mpDeathMode').addEventListener('change', mpPushEnv);
 /* garage inside the room — same showroom, closing returns to the lobby */
 $('mpGarageBtn').addEventListener('click', openGarage);
 

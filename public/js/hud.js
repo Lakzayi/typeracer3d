@@ -283,7 +283,7 @@ export class HUD {
       (['single', 'practice', 'drill', 'custom'].includes(results.mode)
         ? ''
         : results.mode === 'mp'
-          ? `<div class="real">🎮 live multiplayer — each of you typed this on your own screen</div>`
+          ? `<div class="real">🎮 live multiplayer — each of you typed this on your own screen${results.mpDeath && results.resets ? ` · 💀 death mode: ${results.resets} reset${results.resets > 1 ? 's' : ''} back to the start line` : ''}${results.mpDeath && !results.resets ? ' · 💀 death mode — flawless, no resets' : ''}</div>`
           : results.mode === 'bot'
           ? `<div class="real">synthetic bots — at the pace you configured</div>`
           : results.mode === 'daily'

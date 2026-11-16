@@ -29,7 +29,7 @@ function liveLogWpm(log, raceTime, windowS = 8) {
 }
 
 export class RaceController {
-  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic' }) {
+  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic', mpDeath = false }) {
     this.race = race;
     this.world = world;
     this.sound = sound;
@@ -37,6 +37,8 @@ export class RaceController {
     this.typing = typing;
     this.mode = mode;
     this.deadly = mode === 'death';   // one mistake ends the run
+    this.mpDeath = mpDeath && mode === 'mp'; // online: a mistake throws you back to the start line
+    this.resetCount = 0;
     this.solo = SOLO_MODES.includes(mode); // no opponents on track
     this.died = false;
     this.textLen = race.text.length;
@@ -121,6 +123,23 @@ export class RaceController {
     this.world.shake(this.deadly ? 2.4 : 0.8);
     this.world.impact(0, this.deadly ? 1.8 : 0.7);
     if (this.deadly && this.phase === 'racing' && !this.racers[0].finished) this._playerDied();
+    if (this.mpDeath && this.phase === 'racing' && !this.racers[0].finished) this._deathReset();
+  }
+
+  /* mp death mode — a mistake throws you back to the start line: progress,
+   * combo and the WPM log restart while lifetime errors stay on the board.
+   * The vehicle whooshes back to z=0 through the smooth visual lerp. */
+  _deathReset() {
+    this.resetCount++;
+    this.typing.resetToStart();
+    this.state[0].errorT = 0.5;
+    this.world.shake(2.6);
+    this.world.impact(0, 2.2);
+    this.sound.die();
+    this.hud.centerMsg('💀 back to the start line!');
+    clearTimeout(this._resetMsgT);
+    this._resetMsgT = setTimeout(() => this.hud.centerMsg(''), 1400);
+    this.hud.toast(`💀 mistake #${this.resetCount} — back to the start`, 1900);
   }
 
   /* death mode — the first mistake is fatal: the car coasts to a stop and the
@@ -240,6 +259,7 @@ export class RaceController {
       rows, factor: this.factor, raceId: this.race.id, live: this.race.live,
       mode: this.mode,
       died: this.died ? { progress01: rows.find((r) => r.isPlayer).progress01 } : null,
+      mpDeath: this.mpDeath, resets: this.resetCount,
     };
     this.hud.onResults(this.results);
   }
