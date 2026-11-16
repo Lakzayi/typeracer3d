@@ -23,6 +23,7 @@ export class HUD {
       typingPanel: $('typingPanel'), typingText: $('typingText'),
       capsBadge: $('capsBadge'),
       hpHearts: $('hpHearts'), mistakePanel: $('mistakePanel'), mistakeBars: $('mistakeBars'),
+      spectateBar: $('spectateBar'), spRacers: $('spRacers'), spCam: $('spCam'),
       pauseOverlay: $('pauseOverlay'), soundBtn: $('soundBtn'),
       themeCards: $('themeCards'), statsLine: $('statsLine'), menuBadge: $('menuBadge'),
       resPlace: $('resPlace'), resStats: $('resStats'), resBoard: $('resBoard'),
@@ -287,6 +288,31 @@ export class HUD {
     if (!show && this.els.mistakeBars) this.els.mistakeBars.innerHTML = '';
   }
 
+  /* 👻 spectate bar — racer chips (click to watch) + camera cycler */
+  showSpectateBar(show, names = null, activeIdx = 0) {
+    const bar = this.els.spectateBar;
+    if (!bar) return;
+    bar.classList.toggle('hidden', !show);
+    if (!show) return;
+    const wrap = this.els.spRacers;
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    (names ?? []).forEach((n, i) => {
+      const b = document.createElement('button');
+      b.className = 'spRacerBtn' + (i === activeIdx ? ' active' : '');
+      b.dataset.idx = String(i);
+      b.textContent = n;
+      wrap.appendChild(b);
+    });
+  }
+
+  setSpectateRacer(idx) {
+    [...(this.els.spRacers?.querySelectorAll('.spRacerBtn') ?? [])]
+      .forEach((b) => b.classList.toggle('active', Number(b.dataset.idx) === idx));
+  }
+
+  setSpectateCam(label) { if (this.els.spCam) this.els.spCam.textContent = '🎥 ' + label; }
+
   renderMistakes(map) {
     const bars = this.els.mistakeBars;
     if (!bars || !map?.size) return;
@@ -318,6 +344,9 @@ export class HUD {
     // 'race again' (a solo flow that would strand the room) is not offered
     $('menuBtn').textContent = results.mode === 'mp' ? '↩ lobby' : 'menu';
     $('againBtn').classList.toggle('hidden', results.mode === 'mp');
+    // 👻 spectate is offered only while others are still out on the track
+    $('spectateBtn').classList.toggle('hidden',
+      !(results.mode === 'mp' && results.rows.some((r) => !r.isPlayer && !r.finished)));
     let head;
     if (results.died) {
       head = `💀 died at ${Math.round(results.died.progress01 * 100)}%<small>death mode — one mistake ends the run</small>`;

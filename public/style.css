@@ -995,3 +995,30 @@ details.help[open] summary::after { transform: rotate(90deg); }
   font-family: var(--font); font-size: 12px; font-weight: 650; color: var(--text);
   background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
 }
+
+/* ── 👻 spectate: ghost camera bar + results button ── */
+#spectateBar {
+  position: absolute; top: 108px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; max-width: 92vw;
+  padding: 8px 14px; border-radius: 999px;
+}
+#spectateBar .spGhost { font-size: 18px; }
+#spectateBar .spTitle { font-size: 11px; font-weight: 750; letter-spacing: 0.12em; text-transform: uppercase; color: #bdf3dc; }
+#spectateBar .spHint { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+#spRacers { display: flex; gap: 5px; flex-wrap: nowrap; overflow-x: auto; max-width: 40vw; scrollbar-width: none; }
+.spRacerBtn {
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06);
+  color: var(--dim); font: 650 11px var(--font); padding: 4px 10px; border-radius: 999px;
+  cursor: pointer; white-space: nowrap;
+}
+.spRacerBtn:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.spRacerBtn.active { color: #04121f; background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 14px rgba(90, 209, 255, 0.5); }
+#spCam, #spPractice {
+  border: 1px solid rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06);
+  color: var(--text); font: 650 11px var(--font); padding: 4px 10px; border-radius: 999px; cursor: pointer;
+}
+#spCam:hover, #spPractice:hover { background: rgba(255, 255, 255, 0.12); }
+#spectateBtn {
+  background: linear-gradient(120deg, rgba(87, 217, 163, 0.25), rgba(46, 200, 255, 0.25));
+  border: 1px solid rgba(87, 217, 163, 0.5); color: #c9f5e4;
+}

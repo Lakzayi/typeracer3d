@@ -131,14 +131,24 @@ function hostBroadcast(msg) {
   for (const c of conns) { if (c.open) c.send(msg); }
 }
 
+let ghostSnapDone = false; // one final all-finished snapshot already sent
+
 function hostSnapshot() {
-  if (!racing) return;
+  if (!racing && !lastProgress.size) return;
   if (selfProvider) { const s = selfProvider(); if (s) selfState = s; }
   const rows = [{ id: selfId, name: myName, ...selfState }];
   for (const c of conns) {
     const p = lastProgress.get(c.peer);
     if (p) rows.push({ id: c.peer, name: roster.get(c.peer)?.name ?? 'guest', ...p });
   }
+  /* keep streaming while ANYONE is still out on the track — ghosts
+   * (spectators / word-practice) depend on these snaps even after our own
+   * race is over. Once every row is finished, send exactly one last
+   * snapshot (that is the ghosts' exit signal) and stop. */
+  if (!racing && rows.every((r) => r.finished)) {
+    if (ghostSnapDone) return;
+    ghostSnapDone = true;
+  } else ghostSnapDone = false;
   hostBroadcast({ t: 'snap', rows });
   emit('snap', rows); // the host's own race consumes the same merged snapshot
 }
@@ -327,6 +337,7 @@ function clientSelfSnap() {
  * joiners, flaky relays) still race in the host's environment. */
 export function startRace(text, source, raceId, env = null) {
   if (!isHost) return;
+  ghostSnapDone = false;
   if (env?.theme) envState = { theme: env.theme, tod: env.tod ?? null, death: !!env.death, hp: Math.max(0, Math.min(3, (env.hp ?? 0) | 0)) };
   hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod, death: envState.death, hp: envState.hp });
 }

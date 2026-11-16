@@ -393,7 +393,9 @@ function backToMenu() {
   // returns to the lobby so the host can start the next race (teardown used
   // to fire here and killed the room for everyone the instant a finisher
   // — host above all — hit menu while others were still mid-race)
-  const backToLobby = !!(race && race.mode === 'mp') && mpConnected();
+  // ANY race exit while connected to a room lands in the lobby — solo
+  // practice rides included (ghost practice must never tear the room down)
+  const backToLobby = !!race && mpConnected();
   if (race) { race.dispose(); race = null; }
   if (backToLobby) setRacing(false);
   else if (mpConnected()) { setRacing(false); mpTeardown(); }
@@ -413,7 +415,56 @@ function backToMenu() {
   hud.showMirror(false);
   hud.updateCombo(0);
   hud.setSpeedGlow(0);
+  ghost = null;
+  hud.showSpectateBar(false);
+  world && world.setSpectate(null);
+  hud.els.typingPanel.classList.remove('hidden');
   if (backToLobby) reopenRoomLobby();
+}
+
+/* 👻 spectate — stay in the finished race and watch the rest cinematically */
+function enterSpectate() {
+  if (!race || race.mode !== 'mp') return;
+  ghost = 'spectate';
+  race.spectating = true;
+  hud.els.results.classList.add('hidden');
+  hud.els.typingPanel.classList.add('hidden');
+  hud.showMirror(false);
+  world.finishMode = false;
+  world.mirrorEnabled = false;
+  world.setSpectate('cinematic');
+  // land on the first racer still out on the track (fall back to a remote)
+  const stillIn = race.racers.findIndex((r) => !r.isPlayer && !r.finished);
+  world.focusIdx = stillIn >= 0 ? stillIn : (race.racers.length > 1 ? 1 : 0);
+  hud.showSpectateBar(true, race.racers.map((r) => r.name), world.focusIdx);
+  hud.setSpectateCam('cinematic');
+}
+
+/* ⌨️ ghost practice — an endless word stream keeps the fingers warm while the
+ * room finishes; the moment every racer is done, the lobby pulls you back */
+function enterGhostPractice() {
+  if (!mpConnected() || !race) return;
+  ghost = 'practice';
+  hud.showSpectateBar(false);
+  world.setSpectate(null);
+  hud.els.typingPanel.classList.remove('hidden');
+  setRacing(false); // my progress stream is done — practice stays local
+  const parts = [];
+  let len = 0;
+  while (len < 1400) { const t = drillRace('words').text; parts.push(t); len += t.length + 1; }
+  launchRace({ id: 'ghost-words-' + Date.now(), drill: true, live: false,
+    text: parts.join(' '), source: 'ghost practice — endless words', racers: [] },
+    { mode: 'drill', difficulty: 'real' });
+}
+
+function endGhost(reason) {
+  const was = ghost;
+  ghost = null;
+  if (!was) return;
+  hud.showSpectateBar(false);
+  world && world.setSpectate(null);
+  if (reason === 'finished') hud.toast('🏁 the race is over — back to the lobby', 2400);
+  backToMenu(); // mpConnected -> lands in the room lobby
 }
 
 /* an mp race ended — return to the SAME room lobby. The room only closes
@@ -440,6 +491,20 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     setPaused(false);
     return;
+  }
+  /* 👻 spectating: ←/→ switch the watched racer, V cycles the camera */
+  if (ghost === 'spectate' && race) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const n = race.racers.length;
+      const d = e.key === 'ArrowRight' ? 1 : -1;
+      for (let i = 1; i <= n; i++) {
+        const idx = (((world.focusIdx + d * i) % n) + n) % n;
+        if (world.theme?.vehicles?.[idx]) { world.focusIdx = idx; hud.setSpectateRacer(idx); break; }
+      }
+      return;
+    }
+    if (e.key === 'v' || e.key === 'V') { $('spCam').click(); return; }
   }
   if (e.key === 'Escape') {
     if (garageOpen) closeGarage(); // garage may sit on top of the room lobby
@@ -844,6 +909,7 @@ let mpBusy = false;
 let mpAcked = false; // client: the host's roster broadcast confirmed our hello
 let mpDeathOn = false; // 💀 death mode: a mistake throws you back to the start line
 let mpHpHearts = 0; // ❤️ hp mode: N mistakes forgiven before the start-line reset (mp)
+let ghost = null; // 👻 post-finish state: null | 'spectate' | 'practice'
 
 /* host picks (or a 'start' carries) an environment — everyone rebuilds the
  * same world, so the lobby preview AND the race look identical everywhere */
@@ -1089,7 +1155,11 @@ mpOn('start', (msg) => {
   mpLaunch(msg);
 });
 mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
-mpOn('snap', (rows) => { if (race?.mode === 'mp' && race.phase === 'racing') race.applyRemote(rows); });
+mpOn('snap', (rows) => {
+  if (race?.mode === 'mp' && (race.phase === 'racing' || race.spectating)) race.applyRemote(rows);
+  // 👻 ghost auto-exit: every racer in the snapshot has finished — lobby time
+  if (ghost && rows.length && rows.every((r) => r.finished)) endGhost('finished');
+});
 mpOn('left', ({ id }) => {
   if (race?.mode === 'mp') race.remoteLeft(id);
   if (race?.mode === 'mp' && race.phase === 'racing') hud.toast('📴 a player left the race', 2000);
@@ -1138,6 +1208,23 @@ const mpPushEnv = () => {
 $('mpEnvTheme').addEventListener('change', mpPushEnv);
 $('mpEnvTod').addEventListener('change', mpPushEnv);
 $('mpHpMode').addEventListener('change', mpPushEnv);
+
+/* 👻 spectate controls — racer chips, camera cycler, practice escape */
+$('spectateBtn').addEventListener('click', () => { if (race) enterSpectate(); });
+$('spRacers').addEventListener('click', (e) => {
+  const b = e.target.closest('.spRacerBtn');
+  if (!b || !race || ghost !== 'spectate') return;
+  const idx = Number(b.dataset.idx);
+  if (world.theme?.vehicles?.[idx]) { world.focusIdx = idx; hud.setSpectateRacer(idx); }
+});
+const SP_CAMS = [['cinematic', 'cinematic'], ['top', 'top-down'], ['chase', 'chase']];
+$('spCam').addEventListener('click', () => {
+  const i = Math.max(0, SP_CAMS.findIndex(([s]) => s === world.spectateStyle));
+  const [style, label] = SP_CAMS[(i + 1) % SP_CAMS.length];
+  world.setSpectate(style);
+  hud.setSpectateCam(label);
+});
+$('spPractice').addEventListener('click', enterGhostPractice);
 /* garage inside the room — same showroom, closing returns to the lobby */
 $('mpGarageBtn').addEventListener('click', openGarage);
 
@@ -1158,8 +1245,8 @@ function loop(t) {
       setSelfState(typing.pos, typing.recentWpm(), !!typing.finishedAt,
         typing.finishedAt ? typing.elapsedSec() : null, typing.accuracy());
     }
-    world.speed01 = race.state[0].speed01;
-    world.combo01 = Math.min(1, (typing?.combo ?? 0) / 45); // 45-combo = full glow
+    world.speed01 = ghost ? (race.state[world.focusIdx]?.speed01 ?? 0) : race.state[0].speed01;
+    world.combo01 = ghost ? 0 : Math.min(1, (typing?.combo ?? 0) / 45); // 45-combo = full glow
     sound.engineSpeed(world.smoothSpeed01);
     world.update(dt, race.state);
     hud.drawMinimap(race.state);

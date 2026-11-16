@@ -96,6 +96,8 @@ export class World {
     this.themeGroup = null;
     this.theme = null;
     this.focusIdx = 0;
+    this.spectateStyle = null; // ghost cam: 'cinematic' | 'top' | 'chase' | null
+    this._spA = Math.random() * Math.PI * 2; // orbit angle accumulator
     this.speed01 = 0;          // raw target speed
     this.smoothSpeed01 = 0;    // eased, drives FOV/vignette/streaks/sound
     this.combo01 = 0;          // target combo glow (main.js feeds typing.combo)
@@ -155,6 +157,12 @@ export class World {
   /* milestone kick — combo milestones (25/50/100…) call this; it briefly
    * widens the FOV and pushes the streaks so progress FEELS like acceleration */
   pulse(power = 0.6) { this._pulse = Math.max(this._pulse, power); }
+
+  /* ghost camera style — null returns to the normal chase cam */
+  setSpectate(style) {
+    this.spectateStyle = ['cinematic', 'top', 'chase'].includes(style) ? style : null;
+    if (this.spectateStyle) { this.finishMode = false; this.showcase = false; }
+  }
 
   /* additive API for the themes' setTimeOfDay (GRAPHICS_PLAN §1.1, §1.4) */
   setExposure(v) { this.renderer.toneMappingExposure = v; }
@@ -391,7 +399,31 @@ export class World {
     }
 
     // camera (targets written into reused vectors — no per-frame alloc)
-    if (this.finishMode || this.showcase) {
+    if (this.spectateStyle) {
+      /* ghost cam — three views over the watched racer: a slow cinematic orbit
+       * with breathing radius/height, a high top-down, or the chase cam. Same
+       * reused vectors + lerp smoothing: zero per-frame allocations, one
+       * lookAt, no second render pass — a spectator costs almost nothing. */
+      if (this.spectateStyle === 'top') {
+        this._v1.set(carPos.x * 0.55, 30 + s01 * 5, carPos.z + 15);
+        this._v2.set(carPos.x * 0.8, 0, carPos.z - 10);
+        this.camPos.lerp(this._v1, expK(2.2, dt));
+        this.camLook.lerp(this._v2, expK(2.8, dt));
+      } else if (this.spectateStyle === 'chase') {
+        this._v1.set(carPos.x * 0.86, 4.7, carPos.z + 11.5);
+        this._v2.set(carPos.x * 0.92, 1.2, carPos.z - 15);
+        this.camPos.lerp(this._v1, expK(4.5, dt));
+        this.camLook.lerp(this._v2, expK(6.5, dt));
+      } else { // cinematic — the default: slow drifting orbit
+        this._spA += dt * 0.21;
+        const r = 11 + Math.sin(this._spA * 0.6) * 3.2;
+        const h = 4.6 + Math.sin(this._spA * 0.42) * 2.4;
+        this._v1.set(carPos.x + Math.cos(this._spA) * r, h, carPos.z + Math.sin(this._spA) * r);
+        this._v2.set(carPos.x, 1.1, carPos.z - 3);
+        this.camPos.lerp(this._v1, expK(1.8, dt));
+        this.camLook.lerp(this._v2, expK(2.6, dt));
+      }
+    } else if (this.finishMode || this.showcase) {
       const showcase = this.showcase;
       this.orbitT += dt * (showcase ? 0.3 : 0.55);
       const r = showcase ? 6.4 : 9.5;
