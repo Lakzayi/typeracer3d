@@ -415,6 +415,7 @@ function backToMenu() {
   hud.showMirror(false);
   hud.updateCombo(0);
   hud.setSpeedGlow(0);
+  hud.setSpeedBlur(0);
   ghost = null;
   hud.showSpectateBar(false);
   world && world.setSpectate(null);
@@ -648,6 +649,8 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
   if (!world) world = new World($('scene'));
   world.finishMode = false;
   world.focusIdx = 0;
+  world.setSpectate((settings.view ?? 'chase') === 'cockpit' ? 'cockpit' : null); // remember your camera
+  $('viewBtn').textContent = world.spectateStyle === 'cockpit' ? '🪖' : '🎥';
   // the road scales with the text: perceived speed then tracks wpm only —
   // a 600-char custom run is a LONGER road, not a slow crawl (same wpm =
   // same world-units/second). REF = 200 chars → base 900 units; clamps keep
@@ -1217,7 +1220,7 @@ $('spRacers').addEventListener('click', (e) => {
   const idx = Number(b.dataset.idx);
   if (world.theme?.vehicles?.[idx]) { world.focusIdx = idx; hud.setSpectateRacer(idx); }
 });
-const SP_CAMS = [['cinematic', 'cinematic'], ['top', 'top-down'], ['chase', 'chase']];
+const SP_CAMS = [['cinematic', 'cinematic'], ['top', 'top-down'], ['chase', 'chase'], ['cockpit', 'cockpit']];
 $('spCam').addEventListener('click', () => {
   const i = Math.max(0, SP_CAMS.findIndex(([s]) => s === world.spectateStyle));
   const [style, label] = SP_CAMS[(i + 1) % SP_CAMS.length];
@@ -1225,6 +1228,16 @@ $('spCam').addEventListener('click', () => {
   hud.setSpectateCam(label);
 });
 $('spPractice').addEventListener('click', enterGhostPractice);
+
+/* 🪖 first-person toggle — chase <-> cockpit, remembered across races */
+$('viewBtn').addEventListener('click', () => {
+  if (ghost) return; // spectate has its own camera cycler
+  settings.view = (settings.view ?? 'chase') === 'cockpit' ? 'chase' : 'cockpit';
+  saveSettings();
+  world.setSpectate(settings.view === 'cockpit' ? 'cockpit' : null);
+  $('viewBtn').textContent = settings.view === 'cockpit' ? '🪖' : '🎥';
+  hud.toast(settings.view === 'cockpit' ? '🪖 first-person view' : '🎥 chase view', 1400);
+});
 /* garage inside the room — same showroom, closing returns to the lobby */
 $('mpGarageBtn').addEventListener('click', openGarage);
 
@@ -1251,6 +1264,7 @@ function loop(t) {
     world.update(dt, race.state);
     hud.drawMinimap(race.state);
     hud.setSpeedGlow(Math.min(1, world.smoothSpeed01 * 0.75 + world.comboGlow * 0.3));
+    hud.setSpeedBlur(Math.min(1, world.smoothSpeed01 * 0.95 + world.comboGlow * 0.3));
     if (phase === 'racing') {
       hud.updateBoard(race.state);
       hud.updateStats(race.state, typing, race.playerRank(), race.state.length);

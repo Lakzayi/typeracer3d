@@ -23,6 +23,7 @@ export class HUD {
       typingPanel: $('typingPanel'), typingText: $('typingText'),
       capsBadge: $('capsBadge'),
       hpHearts: $('hpHearts'), mistakePanel: $('mistakePanel'), mistakeBars: $('mistakeBars'),
+      speedBlur: $('speedBlur'),
       spectateBar: $('spectateBar'), spRacers: $('spRacers'), spCam: $('spCam'),
       pauseOverlay: $('pauseOverlay'), soundBtn: $('soundBtn'),
       themeCards: $('themeCards'), statsLine: $('statsLine'), menuBadge: $('menuBadge'),
@@ -201,6 +202,26 @@ export class HUD {
 
   setSpeedGlow(v01) {
     this.els.vignette.style.opacity = (v01 * 0.75).toFixed(3);
+  }
+
+  /* speed blur — GPU backdrop blur on the screen edges only; the center of
+   * the frame and the typing panel stay razor sharp. Style writes are
+   * deduped through a dataset stamp so idle frames cost nothing. */
+  setSpeedBlur(v01) {
+    const el = this.els.speedBlur;
+    if (!el) return;
+    if (v01 <= 0.03) {
+      if (el.dataset.on === '1') { el.dataset.on = '0'; el.style.opacity = '0'; el.style.backdropFilter = 'blur(0px)'; el.style.webkitBackdropFilter = 'blur(0px)'; }
+      return;
+    }
+    el.dataset.on = '1';
+    const px = (v01 * 4.5).toFixed(2), op = (v01 * 0.9).toFixed(3);
+    if (el.dataset.px !== px) {
+      el.dataset.px = px;
+      el.style.backdropFilter = `blur(${px}px)`;
+      el.style.webkitBackdropFilter = `blur(${px}px)`;
+    }
+    if (el.dataset.op !== op) { el.dataset.op = op; el.style.opacity = op; }
   }
 
   showMirror(show) {

@@ -158,10 +158,20 @@ export class World {
    * widens the FOV and pushes the streaks so progress FEELS like acceleration */
   pulse(power = 0.6) { this._pulse = Math.max(this._pulse, power); }
 
-  /* ghost camera style — null returns to the normal chase cam */
+  /* camera override — ghost views AND the first-person cockpit; null = chase */
   setSpectate(style) {
-    this.spectateStyle = ['cinematic', 'top', 'chase'].includes(style) ? style : null;
+    this.spectateStyle = ['cinematic', 'top', 'chase', 'cockpit'].includes(style) ? style : null;
     if (this.spectateStyle) { this.finishMode = false; this.showcase = false; }
+    else this.cockpitVisibility(); // leaving first person: bring every car back
+  }
+
+  /* first person hides the watched car — everything else stays visible */
+  cockpitVisibility() {
+    const vehicles = this.theme?.vehicles;
+    if (!vehicles) return;
+    for (let i = 0; i < vehicles.length; i++) {
+      if (vehicles[i]?.group) vehicles[i].group.visible = !(this.spectateStyle === 'cockpit' && i === this.focusIdx);
+    }
   }
 
   /* additive API for the themes' setTimeOfDay (GRAPHICS_PLAN §1.1, §1.4) */
@@ -326,6 +336,7 @@ export class World {
     const focus = this.theme?.vehicles?.[this.focusIdx];
     if (!focus) return;
     const carPos = focus.group.position;
+    if (this.spectateStyle === 'cockpit') this.cockpitVisibility();
 
     // eased speed for all visual reactions (FOV, streaks, vignette, sound)
     this.smoothSpeed01 += (this.speed01 - this.smoothSpeed01) * expK(3.2, dt);
@@ -414,6 +425,13 @@ export class World {
         this._v2.set(carPos.x * 0.92, 1.2, carPos.z - 15);
         this.camPos.lerp(this._v1, expK(4.5, dt));
         this.camLook.lerp(this._v2, expK(6.5, dt));
+      } else if (this.spectateStyle === 'cockpit') {
+        /* first person — nose cam: near-rigid (no lag, the car must never
+         * slide under you) looking far down the road, wide FOV for speed */
+        this._v1.set(carPos.x * 0.9, carPos.y + 1.45, carPos.z - 2.2);
+        this._v2.set(carPos.x * 0.85, carPos.y + 1.05, carPos.z - 42);
+        this.camPos.lerp(this._v1, expK(14, dt));
+        this.camLook.lerp(this._v2, expK(12, dt));
       } else { // cinematic — the default: slow drifting orbit
         this._spA += dt * 0.21;
         const r = 11 + Math.sin(this._spA * 0.6) * 3.2;
@@ -455,7 +473,7 @@ export class World {
     }
     this.camera.lookAt(l);
 
-    const targetFov = 62 + s01 * 13 + glow * 6 + this._pulse * 7;
+    const targetFov = 62 + s01 * 13 + glow * 6 + this._pulse * 7 + (this.spectateStyle === 'cockpit' ? 9 : 0);
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov += (targetFov - this.camera.fov) * expK(3, dt);
       this.camera.updateProjectionMatrix();

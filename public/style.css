@@ -175,6 +175,14 @@ body {
 #comboBadge.hot { color: #ffb15c; text-shadow: 0 0 30px rgba(255, 130, 40, 0.85), 0 2px 12px rgba(0, 0, 0, 0.65); }
 @keyframes comboPop { from { transform: translateX(-50%) scale(0.82); } }
 
+#viewBtn {
+  position: absolute; top: 16px; right: 240px; width: 38px; height: 38px;
+  border-radius: 50%; border: 1px solid var(--glass-brd);
+  background: var(--glass-bg); color: var(--text); font-size: 15px;
+  cursor: pointer; backdrop-filter: blur(14px) saturate(150%);
+  transition: transform 0.2s var(--spring), background 0.2s;
+}
+#viewBtn:hover { background: rgba(255, 255, 255, 0.12); }
 #soundBtn {
   position: absolute; top: 16px; right: 196px; width: 38px; height: 38px;
   border-radius: 50%; border: 1px solid var(--glass-brd);
@@ -206,6 +214,15 @@ body {
 #vignette {
   position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(ellipse at center, transparent 52%, rgba(6, 9, 18, 0.55) 100%);
+}
+/* speed blur — the screen edges melt into motion while the center (your line
+   of travel + the typing panel, which sits above this layer) stays sharp */
+#speedBlur {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  -webkit-backdrop-filter: blur(0px); backdrop-filter: blur(0px);
+  -webkit-mask-image: radial-gradient(ellipse 64% 64% at 50% 44%, transparent 40%, #000 76%);
+  mask-image: radial-gradient(ellipse 64% 64% at 50% 44%, transparent 40%, #000 76%);
+  will-change: backdrop-filter, opacity;
 }
 
 #typingPanel {
@@ -941,6 +958,7 @@ details.help[open] summary::after { transform: rotate(90deg); }
   #minimapPanel { transform: scale(0.88); transform-origin: top right; }
   #board { display: none; }
   #soundBtn { right: 16px; top: 246px; }
+  #viewBtn { right: 62px; top: 246px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
