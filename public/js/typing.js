@@ -11,6 +11,11 @@
 
 const MILESTONES = [25, 50, 100, 200, 300, 500];
 
+/* any Arabic/Persian/Hebrew block character -> the text flows right-to-left.
+ * The typing panel switches base direction so Persian races read naturally:
+ * text hugs the right edge and typed chars grow leftward. */
+const RTL_TEXT = new RegExp('[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]');
+
 export class TypingEngine {
   constructor(textEl, inputEl, hooks = {}) {
     this.textEl = textEl;
@@ -53,6 +58,8 @@ export class TypingEngine {
       .replace(/[“”„]/g, '"')
       .replace(/\u00A0/g, ' ')
       .replace(/\u200D/g, '\u200C'); // ZWJ -> ZWNJ: same half-space, typed the same
+    this.textEl.style.direction = RTL_TEXT.test(this.text) ? 'rtl' : 'ltr';
+    this.textEl.style.textAlign = 'start'; // follows the direction above
     this.pos = 0; this.correct = 0; this.errors = 0;
     this.buffer = []; this.bufferEls = [];
     this.combo = 0; this.maxCombo = 0; this._nextMilestone = 0;
