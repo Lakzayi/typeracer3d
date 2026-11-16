@@ -459,10 +459,12 @@ export class World {
     const _mainCalls = this._probeDC ? r.info.render.calls : 0;
     const _mainTris = this._probeDC ? r.info.render.triangles : 0;
 
-    // rearview mirror pass — every OTHER frame: the scene renders twice
-    // otherwise and the mirror content at 30 Hz is indistinguishable while
-    // it costs half as much (biggest single render win we have)
-    if (this.mirrorEnabled && even && this.theme?.vehicles?.[this.focusIdx]) {
+    // rearview mirror pass — every frame. A half-rate variant was tried and
+    // REVERTED: the mirror is scissor-composited onto the MAIN canvas, so on
+    // skipped frames the main camera shows through the mirror region and the
+    // whole top strip strobes at speed (unlike the shadow maps, which are an
+    // input to lighting and safe to update at 30 Hz)
+    if (this.mirrorEnabled && this.theme?.vehicles?.[this.focusIdx]) {
       const w = r.domElement.clientWidth, h = r.domElement.clientHeight;
       const mw = Math.min(372, w * 0.42), mh = 94;
       const mx = (w - mw) / 2, my = 58;
