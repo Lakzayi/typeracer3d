@@ -56,7 +56,8 @@ let isHost = false;
 let code = null;
 let myName = 'YOU';
 let selfId = null;
-let roster = new Map(); // id -> name (host's source of truth)
+let roster = new Map(); // id -> { name, garage } (host's source of truth)
+let envState = { theme: null, tod: null }; // last host-picked environment
 let lastProgress = new Map(); // id -> { pos, wpm, finished, time, acc }
 let selfState = { pos: 0, wpm: 0, finished: false, time: null, acc: 95 };
 let racing = false;
@@ -74,7 +75,8 @@ export function mpHost() { return isHost; }
 export function mpCode() { return code; }
 export function mpSelfId() { return selfId; }
 export function mpPlayers() {
-  return [...roster.entries()].map(([id, name]) => ({ id, name }));
+  return [...roster.entries()].map(([id, v]) =>
+    ({ id, name: typeof v === 'string' ? v : v?.name ?? 'guest', garage: typeof v === 'object' ? v?.garage ?? null : null }));
 }
 
 function loadPeer() {
@@ -135,7 +137,7 @@ function hostSnapshot() {
   const rows = [{ id: selfId, name: myName, ...selfState }];
   for (const c of conns) {
     const p = lastProgress.get(c.peer);
-    if (p) rows.push({ id: c.peer, name: roster.get(c.peer) ?? 'guest', ...p });
+    if (p) rows.push({ id: c.peer, name: roster.get(c.peer)?.name ?? 'guest', ...p });
   }
   hostBroadcast({ t: 'snap', rows });
   emit('snap', rows); // the host's own race consumes the same merged snapshot
@@ -155,10 +157,19 @@ function wireHost() {
       stats.recv++;
       stats.lastRecvAt = Date.now();
       if (msg?.t === 'hello') {
-        roster.set(conn.peer, String(msg.name || 'guest').slice(0, 14) || 'guest');
+        const name = String(msg.name || 'guest').slice(0, 14) || 'guest';
+        roster.set(conn.peer, { name, garage: msg.garage ?? null });
+        // the newcomer missed earlier env picks — send the current one now
+        if (envState.theme) hostBroadcast({ t: 'env', theme: envState.theme, tod: envState.tod });
         hostBroadcast({ t: 'players', players: mpPlayers() });
         emit('players', mpPlayers());
-        emit('status', { msg: `${roster.get(conn.peer)} joined` });
+        emit('status', { msg: `${name} joined` });
+      } else if (msg?.t === 'myPaint') {
+        // garage change mid-lobby: store + rebroadcast so every screen repaints
+        const cur = roster.get(conn.peer);
+        roster.set(conn.peer, { name: cur?.name ?? 'guest', garage: msg.garage ?? null });
+        hostBroadcast({ t: 'players', players: mpPlayers() });
+        emit('players', mpPlayers());
       } else if (msg?.t === 'progress') {
         lastProgress.set(conn.peer, {
           pos: msg.pos ?? 0, wpm: msg.wpm ?? 0,
@@ -173,7 +184,7 @@ function wireHost() {
     });
     conn.on('close', () => {
       conns = conns.filter((c) => c !== conn);
-      const name = roster.get(conn.peer);
+      const name = roster.get(conn.peer)?.name;
       roster.delete(conn.peer);
       lastProgress.delete(conn.peer);
       hostBroadcast({ t: 'left', id: conn.peer });
@@ -184,7 +195,7 @@ function wireHost() {
   });
 }
 
-export async function createRoom(name) {
+export async function createRoom(name, garage = null) {
   await teardown();
   isHost = true;
   myName = name;
@@ -209,7 +220,7 @@ export async function createRoom(name) {
     }
   }
   selfId = peer.id;
-  roster.set(selfId, myName);
+  roster.set(selfId, { name: myName, garage });
   wireHost();
   timers.push(setInterval(hostSnapshot, BROADCAST_MS));
   // belt-and-braces: re-register even if the 'disconnected' event got missed
@@ -262,7 +273,7 @@ function connectToHost(peer, roomCode) {
   });
 }
 
-export async function joinRoom(roomCode, name) {
+export async function joinRoom(roomCode, name, garage = null) {
   await teardown();
   isHost = false;
   myName = name;
@@ -275,10 +286,12 @@ export async function joinRoom(roomCode, name) {
     stats.recv++;
     stats.lastRecvAt = Date.now();
     if (msg?.t === 'players') {
-      roster = new Map(msg.players.map((p) => [p.id, p.name]));
+      roster = new Map(msg.players.map((p) => [p.id, { name: p.name, garage: p.garage ?? null }]));
       emit('players', mpPlayers());
+    } else if (msg?.t === 'env') {
+      emit('env', { theme: msg.theme, tod: msg.tod });
     } else if (msg?.t === 'start') {
-      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId });
+      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId, theme: msg.theme, tod: msg.tod });
     } else if (msg?.t === 'snap') {
       emit('snap', msg.rows ?? []);
     } else if (msg?.t === 'left') {
@@ -289,7 +302,7 @@ export async function joinRoom(roomCode, name) {
     emit('status', { msg: 'host closed the room', error: true });
     emit('roomClosed');
   });
-  myConn.send({ t: 'hello', name });
+  myConn.send({ t: 'hello', name, garage });
   timers.push(setInterval(clientSelfSnap, SELF_SNAP_MS));
   emit('room', { code, host: false });
   return { code, host: false };
@@ -309,10 +322,34 @@ function clientSelfSnap() {
 
 /* ---------- shared controls (called by main.js) ---------- */
 
-/* host: launch the same race on every connected browser */
-export function startRace(text, source, raceId) {
+/* host: launch the same race on every connected browser. env travels along
+ * as belt-and-braces — clients that missed the lobby 'env' broadcast (late
+ * joiners, flaky relays) still race in the host's environment. */
+export function startRace(text, source, raceId, env = null) {
   if (!isHost) return;
-  hostBroadcast({ t: 'start', text, source, raceId });
+  if (env?.theme) envState = { theme: env.theme, tod: env.tod ?? null };
+  hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod });
+}
+
+/* host picks a new environment mid-lobby — broadcast for the live preview */
+export function sendEnv(theme, tod) {
+  if (!isHost) return;
+  envState = { theme, tod };
+  hostBroadcast({ t: 'env', theme, tod });
+  emit('env', { theme, tod }); // the host's own screen applies the same way
+}
+
+/* garage changed while in a room — host updates the roster directly,
+ * clients push to the host who rebroadcasts with the next 'players' */
+export function setMyGarage(garage) {
+  if (!peer) return;
+  if (isHost) {
+    roster.set(selfId, { name: myName, garage });
+    hostBroadcast({ t: 'players', players: mpPlayers() });
+    emit('players', mpPlayers());
+  } else {
+    myConn?.send({ t: 'myPaint', garage });
+  }
 }
 
 /* main.js hands in a () => {pos, wpm, finished, time, acc} | null getter */
@@ -345,6 +382,7 @@ export async function teardown() {
   selfId = null;
   roster = new Map();
   lastProgress = new Map();
+  envState = { theme: null, tod: null };
 }
 
 /* debug handle (devtools / test harness) */

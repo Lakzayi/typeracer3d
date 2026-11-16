@@ -22,7 +22,7 @@ import { getLanguage, pickPoolText } from './languages.js';
 import {
   on as mpOn, createRoom as mpCreateRoom, joinRoom as mpJoinRoom,
   teardown as mpTeardown, startRace as mpNetStart, setSelfState, setSelfProvider, setRacing,
-  mpConnected, mpHost, mpCode, mpSelfId, mpPlayers,
+  mpConnected, mpHost, mpCode, mpSelfId, mpPlayers, sendEnv as mpSendEnv, setMyGarage as mpSetMyGarage,
 } from './net.js';
 
 const $ = (id) => document.getElementById(id);
@@ -182,6 +182,7 @@ function setGarage(patch) {
   saveSettings();
   renderGarage();
   rebuildIdleTheme(); // the menu backdrop IS the preview
+  if (mpConnected()) mpSetMyGarage(settings.garage); // everyone in the room repaints you
 }
 
 function renderGarage() {
@@ -237,6 +238,7 @@ function openGarage() {
   garageSavedLineup = themeRacers;
   themeRacers = [{ name: 'YOU', isPlayer: true, paint: null }];
   hud.els.menu.classList.add('hidden');
+  if (mpOpen) $('mpView').classList.add('hidden'); // garage overlays the room lobby
   $('garageView').classList.remove('hidden');
   world.showcase = true;
   world.orbitT = Math.PI * 0.65; // open facing the nose, not the tail
@@ -251,8 +253,12 @@ function closeGarage() {
   world.showcase = false;
   themeRacers = garageSavedLineup ?? [{ name: 'YOU', isPlayer: true, paint: null }];
   garageSavedLineup = null;
-  hud.els.menu.classList.remove('hidden');
-  rebuildIdleTheme(); // back to the parked menu lineup
+  if (mpOpen) {
+    $('mpView').classList.remove('hidden'); // back to the room, not the menu
+  } else {
+    hud.els.menu.classList.remove('hidden');
+  }
+  rebuildIdleTheme(); // parked lineup (room lineup if inside a lobby)
 }
 
 $('garageOpenBtn').addEventListener('click', openGarage);
@@ -400,8 +406,8 @@ function backToMenu() {
 window.addEventListener('keydown', (e) => {
   const inTyping = e.target && e.target.id === 'typeInput';
   if (e.key === 'Escape') {
-    if (mpOpen) closeMpLobby();
-    else if (garageOpen) closeGarage();
+    if (garageOpen) closeGarage(); // garage may sit on top of the room lobby
+    else if (mpOpen) closeMpLobby();
     else if (phase === 'racing' || phase === 'countdown') backToMenu();
   }
   // live day/night toggle (never while typing the race text!)
@@ -549,14 +555,16 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
 
   const racers = [{ name: 'YOU', isPlayer: true, paint: playerPaint(currentThemeId) }];
   // opponents in race order (same order the controller derives) — each rolls a
-  // random model + livery, seeded by THIS race id so replays look identical
+  // random model + livery, seeded by THIS race id so replays look identical,
+  // unless they brought their own garage livery (multiplayer guests/host)
   const replaced = myName ? raceData.racers.find((r) => r.name.toLowerCase() === myName.toLowerCase()) : null;
   for (const r of raceData.racers) {
     if (racers.length >= 5) break;
     if (replaced && r.name === replaced.name) continue;
     racers.push({
       name: r.name, isPlayer: false,
-      paint: r.isGhost ? GHOST_PAINT : paintFor(currentThemeId, (raceData.id || '') + '|' + r.name),
+      paint: r.isGhost ? GHOST_PAINT
+        : r.paint ?? paintFor(currentThemeId, (raceData.id || '') + '|' + r.name),
     });
   }
   themeRacers = racers; // garage edits repaint this lineup live on the menu
@@ -799,6 +807,55 @@ let mpOpen = false;
 let mpBusy = false;
 let mpAcked = false; // client: the host's roster broadcast confirmed our hello
 
+/* host picks (or a 'start' carries) an environment — everyone rebuilds the
+ * same world, so the lobby preview AND the race look identical everywhere */
+function applyMpEnv(theme, tod) {
+  if (race || phase !== 'menu') return; // never re-theme mid-race
+  let changed = false;
+  if (theme && THEMES[theme]?.status === 'live' && theme !== currentThemeId) {
+    currentThemeId = theme;
+    changed = true;
+  }
+  if (tod && ['day', 'sunset', 'night'].includes(tod) && tod !== settings.timeOfDay) {
+    settings.timeOfDay = tod;
+    const sel = $('timeOfDay');
+    if (sel) sel.value = tod;
+    changed = true;
+  }
+  if (changed) {
+    buildThemeCards();
+    renderGarage();
+    rebuildIdleTheme();
+    updateMpEnvLine();
+  }
+}
+
+/* the lobby backdrop shows the ROOM lineup with everyone's chosen livery —
+ * garage edits anywhere repaint every screen in the room, live */
+function rebuildRoomLineup() {
+  if (!mpOpen || race || phase !== 'menu') return;
+  themeRacers = mpPlayers().map((p) => ({
+    name: p.name,
+    isPlayer: p.id === mpSelfId(),
+    paint: p.id === mpSelfId() ? null
+      : p.garage?.[currentThemeId]
+        ? { ...GARAGE_DEFAULTS[currentThemeId], ...p.garage[currentThemeId], variant: p.garage[currentThemeId].model ?? 0 }
+        : null,
+  }));
+  rebuildIdleTheme();
+}
+
+function updateMpEnvLine() {
+  const el = $('mpEnvLine');
+  if (!el) return;
+  const show = mpOpen && !mpHost();
+  el.classList.toggle('hidden', !show);
+  if (show) {
+    const t = THEMES[currentThemeId];
+    el.textContent = `🗺 environment: ${t?.icon ?? ''} ${t?.name ?? currentThemeId} · ${settings.timeOfDay} — the host's choice`;
+  }
+}
+
 const escHtml = (s) => s.replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -847,6 +904,14 @@ function showMpWait() {
   }
   renderMpPlayers();
   setMpStatus('');
+  if (host) {
+    // env controls start from the host's CURRENT world — the lobby backdrop
+    // is already showing it, so guests joining see exactly this
+    $('mpEnvTheme').value = currentThemeId;
+    $('mpEnvTod').value = settings.timeOfDay;
+  } else {
+    updateMpEnvLine();
+  }
   if (!host) {
     // "you are in" must be honest: it only counts once the host's roster
     // broadcast confirms our hello actually landed. Until then, say so.
@@ -871,6 +936,7 @@ function openMpLobby(autoCode = null) {
 
 function closeMpLobby() {
   if (!mpOpen) return;
+  if (garageOpen) closeGarage(); // garage over the room closes with it
   mpOpen = false;
   $('mpView').classList.add('hidden');
   hud.els.menu.classList.remove('hidden');
@@ -887,7 +953,7 @@ async function joinWithCode() {
   const name = ($('mpName').value || '').trim() || 'YOU';
   settings.name = name; saveSettings();
   try {
-    await mpJoinRoom(c, name);
+    await mpJoinRoom(c, name, settings.garage ?? {});
     showMpWait();
   } catch (e) {
     setMpStatus(e.message, true);
@@ -916,7 +982,8 @@ async function mpHostStart() {
       text = rd.text; source = rd.source; raceId = rd.id;
     }
     setMpStatus('');
-    mpNetStart(text, source, raceId); // clients launch via the 'start' event
+    // the host's environment travels with the start (late joiners included)
+    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay });
     await mpLaunch({ text, source, raceId });
   } catch (e) {
     setMpStatus('could not start: ' + e.message, true);
@@ -935,7 +1002,13 @@ async function mpLaunch({ text, source, raceId }) {
   await launchRace({
     id: raceId, text, source, mp: true,
     racers: mpPlayers().filter((p) => p.id !== mpSelfId())
-      .map((p) => ({ name: p.name, isRemote: true, remoteId: p.id })),
+      .map((p) => ({
+        name: p.name, isRemote: true, remoteId: p.id,
+        // everyone races with THEIR garage livery (host's env theme)
+        paint: p.garage?.[currentThemeId]
+          ? { ...GARAGE_DEFAULTS[currentThemeId], ...p.garage[currentThemeId], variant: p.garage[currentThemeId].model ?? 0 }
+          : null,
+      })),
   }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null });
 }
 
@@ -958,9 +1031,17 @@ mpOn('players', () => {
     mpAcked = true;
     setMpStatus('✓ connected — waiting for the host to start');
   }
+  rebuildRoomLineup(); // lobby backdrop = the live room lineup
+});
+mpOn('env', ({ theme, tod }) => {
+  applyMpEnv(theme, tod);
+  updateMpEnvLine();
+});
+mpOn('start', (msg) => {
+  applyMpEnv(msg.theme, msg.tod); // belt-and-braces: late joiners still match
+  mpLaunch(msg);
 });
 mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
-mpOn('start', (msg) => mpLaunch(msg));
 mpOn('snap', (rows) => { if (race?.mode === 'mp' && race.phase === 'racing') race.applyRemote(rows); });
 mpOn('left', ({ id }) => {
   if (race?.mode === 'mp') race.remoteLeft(id);
@@ -983,7 +1064,7 @@ $('mpCreateBtn').addEventListener('click', async () => {
   const name = ($('mpName').value || '').trim() || 'YOU';
   settings.name = name; saveSettings();
   try {
-    await mpCreateRoom(name);
+    await mpCreateRoom(name, settings.garage ?? {});
     showMpWait();
   } catch (e) {
     showMpHome(); // reset the buttons, then surface the real error on top
@@ -996,6 +1077,19 @@ $('mpRaceType').addEventListener('change', () => {
   $('mpCustomText').classList.toggle('hidden', $('mpRaceType').value !== 'custom');
 });
 $('mpStartBtn').addEventListener('click', mpHostStart);
+
+/* host reshapes the world mid-lobby: both selects broadcast together and the
+ * change applies locally through the SAME 'env' path guests use */
+const mpPushEnv = () => {
+  const theme = $('mpEnvTheme').value, tod = $('mpEnvTod').value;
+  applyMpEnv(theme, tod);
+  mpSendEnv(theme, tod);
+  updateMpEnvLine();
+};
+$('mpEnvTheme').addEventListener('change', mpPushEnv);
+$('mpEnvTod').addEventListener('change', mpPushEnv);
+/* garage inside the room — same showroom, closing returns to the lobby */
+$('mpGarageBtn').addEventListener('click', openGarage);
 
 /* ---------------- render loop ---------------- */
 
@@ -1051,6 +1145,7 @@ requestAnimationFrame(loop);
 window.__tr3d = {
   get race() { return race; }, get typing() { return typing; }, get world() { return world; },
   get settings() { return settings; }, get sound() { return sound; },
+  get themeId() { return currentThemeId; },
   setPaused, startRaceFlow, backToMenu,
 };
 

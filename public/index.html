@@ -344,7 +344,23 @@
       <div id="mpWait" class="mpSection hidden">
         <div id="mpRoomLine" class="mpRoomLine"></div>
         <div id="mpPlayerList" class="mpPlayerList"></div>
+        <button id="mpGarageBtn">🔧 your garage — paint &amp; model (everyone sees it)</button>
+        <div id="mpEnvLine" class="mpEnvLine hidden"></div>
         <div id="mpHostCtrls" class="mpHostCtrls hidden">
+          <div class="gcRow">
+            <label>environment</label>
+            <select id="mpEnvTheme">
+              <option value="car">🏎️ Street Race</option>
+              <option value="boat">🚤 River Rapids</option>
+              <option value="horse">🐎 Wild West Ride</option>
+              <option value="rocket">🚀 Orbit Dash</option>
+            </select>
+            <select id="mpEnvTod">
+              <option value="day">☀️ day</option>
+              <option value="sunset">🌇 sunset</option>
+              <option value="night">🌙 night</option>
+            </select>
+          </div>
           <div class="gcRow">
             <label>race</label>
             <select id="mpRaceType">
