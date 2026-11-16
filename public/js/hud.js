@@ -22,6 +22,7 @@ export class HUD {
       board: $('board'), dataBadge: $('dataBadge'), centerMsg: $('centerMsg'),
       typingPanel: $('typingPanel'), typingText: $('typingText'),
       capsBadge: $('capsBadge'),
+      hpHearts: $('hpHearts'), mistakePanel: $('mistakePanel'), mistakeBars: $('mistakeBars'),
       pauseOverlay: $('pauseOverlay'), soundBtn: $('soundBtn'),
       themeCards: $('themeCards'), statsLine: $('statsLine'), menuBadge: $('menuBadge'),
       resPlace: $('resPlace'), resStats: $('resStats'), resBoard: $('resBoard'),
@@ -244,6 +245,71 @@ export class HUD {
   /* caps lock warning — lives above the typing panel, only visible while on */
   setCaps(on) { this.els.capsBadge.classList.toggle('hidden', !on); }
 
+  /* ❤️ hp hearts — shown only in hp races; hurt=true pulses the just-lost one */
+  setHearts(left, max, hurt = false) {
+    const el = this.els.hpHearts;
+    if (!el) return;
+    if (!max) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    let html = '';
+    for (let i = 0; i < max; i++) {
+      const alive = i < left;
+      const justLost = !alive && hurt && i === left;
+      html += `<span class="hpHeart${alive ? '' : ' lost'}${justLost ? ' hurt' : ''}">${alive ? '❤' : '♡'}</span>`;
+    }
+    el.innerHTML = html;
+    el.classList.remove('hidden');
+  }
+
+  /* the mistake popup: the char you SHOULD have typed slides in green from the
+   * right, the char you DID type rises red from the left-bottom — anchored at
+   * the caret's screen position so the player sees it exactly where it bit */
+  mistakeFlash(expected, typed, rect = null) {
+    const r = rect || this.els.typingPanel?.getBoundingClientRect();
+    if (!r) return;
+    const vis = (ch) => (ch === ' ' || ch === undefined || ch === null) ? '␣' : ch === '\n' ? '⏎' : ch;
+    const wrap = document.createElement('div');
+    wrap.className = 'mistakePop';
+    const exp = document.createElement('span'); exp.className = 'exp'; exp.textContent = vis(expected);
+    const got = document.createElement('span'); got.className = 'got'; got.textContent = vis(typed);
+    wrap.append(exp, got);
+    wrap.style.left = Math.round(r.left + r.width / 2 - 18) + 'px';
+    wrap.style.top = Math.round(r.top - 12) + 'px';
+    document.body.appendChild(wrap);
+    setTimeout(() => wrap.remove(), 950);
+  }
+
+  /* 💀 worst-keys panel (death/hp races): top-5 mistake pairs as a sorted
+   * column chart — count on top, bar in the middle, expected→typed below */
+  showMistakes(show) {
+    const el = this.els.mistakePanel;
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    if (!show && this.els.mistakeBars) this.els.mistakeBars.innerHTML = '';
+  }
+
+  renderMistakes(map) {
+    const bars = this.els.mistakeBars;
+    if (!bars || !map?.size) return;
+    const rows = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const max = rows[0][1];
+    const vis = (ch) => (ch === ' ' || ch === undefined) ? '␣' : ch === '\n' ? '⏎' : ch;
+    bars.innerHTML = '';
+    for (const [key, count] of rows) {
+      const [exp, got] = key.split('|');
+      const col = document.createElement('div'); col.className = 'mCol';
+      const cnt = document.createElement('div'); cnt.className = 'mCount'; cnt.textContent = count;
+      const bar = document.createElement('div'); bar.className = 'mBar';
+      bar.style.height = Math.max(10, Math.round((count / max) * 44)) + 'px';
+      const lbl = document.createElement('div'); lbl.className = 'mKey';
+      const e1 = document.createElement('b'); e1.className = 'mExp'; e1.textContent = vis(exp);
+      const ar = document.createElement('span'); ar.textContent = '→';
+      const e2 = document.createElement('b'); e2.className = 'mGot'; e2.textContent = vis(got);
+      lbl.append(e1, ar, e2);
+      col.append(cnt, bar, lbl);
+      bars.appendChild(col);
+    }
+  }
+
   /* ---------- results ---------- */
   onResults(results) {
     const { rows } = results;
@@ -287,7 +353,7 @@ export class HUD {
       (['single', 'practice', 'drill', 'custom'].includes(results.mode)
         ? ''
         : results.mode === 'mp'
-          ? `<div class="real">🎮 live multiplayer — each of you typed this on your own screen${results.mpDeath && results.resets ? ` · 💀 death mode: ${results.resets} reset${results.resets > 1 ? 's' : ''} back to the start line` : ''}${results.mpDeath && !results.resets ? ' · 💀 death mode — flawless, no resets' : ''}</div>`
+          ? `<div class="real">🎮 live multiplayer — each of you typed this on your own screen${results.mpDeath && results.resets ? ` · 💀 death mode: ${results.resets} reset${results.resets > 1 ? 's' : ''} back to the start line` : ''}${results.mpDeath && !results.resets ? ' · 💀 death mode — flawless, no resets' : ''}${results.hpMax ? ` · ❤️ hp: ${results.hpMax} heart${results.hpMax > 1 ? 's' : ''} — ${results.hpLost} mistake${results.hpLost === 1 ? '' : 's'} absorbed` : ''}</div>`
           : results.mode === 'bot'
           ? `<div class="real">synthetic bots — at the pace you configured</div>`
           : results.mode === 'daily'

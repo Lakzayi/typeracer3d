@@ -29,7 +29,7 @@ function liveLogWpm(log, raceTime, windowS = 8) {
 }
 
 export class RaceController {
-  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic', mpDeath = false }) {
+  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic', mpDeath = false, hpMax = 0 }) {
     this.race = race;
     this.world = world;
     this.sound = sound;
@@ -38,6 +38,9 @@ export class RaceController {
     this.mode = mode;
     this.deadly = mode === 'death';   // one mistake ends the run
     this.mpDeath = mpDeath && mode === 'mp'; // online: a mistake throws you back to the start line
+    this.hpMax = mode === 'mp' ? Math.max(0, Math.min(3, hpMax | 0)) : 0; // ❤️ hp: N mistakes forgiven, then the start line
+    this.hpLeft = this.hpMax;
+    this.mistakes = new Map(); // "expected|typed" -> count (worst-keys panel)
     this.resetCount = 0;
     this.solo = SOLO_MODES.includes(mode); // no opponents on track
     this.died = false;
@@ -49,6 +52,8 @@ export class RaceController {
     this.endTimer = null;
     this.comboHeat = 0;
     this._prevRank = null;
+    if (this.hpMax) this.hud.setHearts(this.hpLeft, this.hpMax);
+    if (this.mpDeath || this.hpMax) this.hud.showMistakes(true);
 
     const rng = mulberry32(12345); // per-race bot variation (not scenery)
 
@@ -117,13 +122,35 @@ export class RaceController {
 
   setPaused(p) { this.paused = p; }
 
-  notifyError() {
+  notifyError(expected, typed) {
     const s = this.state[0];
     s.errorT = 0.3;
-    this.world.shake(this.deadly ? 2.4 : 0.8);
-    this.world.impact(0, this.deadly ? 1.8 : 0.7);
+    this.world.shake(this.deadly ? 2.4 : this.mpDeath || this.hpMax ? 1.7 : 0.8);
+    this.world.impact(0, this.deadly ? 1.8 : this.mpDeath || this.hpMax ? 1.3 : 0.7);
+    if (expected !== undefined) {
+      const key = String(expected) + '|' + String(typed ?? '?');
+      this.mistakes.set(key, (this.mistakes.get(key) ?? 0) + 1);
+      this.hud.renderMistakes(this.mistakes);
+    }
     if (this.deadly && this.phase === 'racing' && !this.racers[0].finished) this._playerDied();
     if (this.mpDeath && this.phase === 'racing' && !this.racers[0].finished) this._deathReset();
+    else if (this.hpMax && this.phase === 'racing' && !this.racers[0].finished) {
+      if (this.hpLeft > 0) this._hpHit(expected, typed);
+      else this._deathReset();
+    }
+  }
+
+  /* ❤️ hp mode — a mistake burns a heart: no reset, and the popup shows what
+   * went wrong so the player can self-correct. At 0 hearts the next mistake
+   * takes you back to the start line (the death-mode reset). */
+  _hpHit(expected, typed) {
+    this.hpLeft--;
+    this.hud.setHearts(this.hpLeft, this.hpMax, true);
+    this.hud.mistakeFlash(expected, typed, this.typing.spans[this.typing.pos]?.getBoundingClientRect?.());
+    const left = this.hpLeft;
+    this.hud.toast(left > 0
+      ? `💔 wrong key — ${left} heart${left > 1 ? 's' : ''} left`
+      : '💔 that was your last heart — the next mistake resets you!', 2100);
   }
 
   /* mp death mode — a mistake throws you back to the start line: progress,
@@ -240,6 +267,8 @@ export class RaceController {
   _finalize() {
     if (this.phase === 'finished') return;
     this.phase = 'finished';
+    this.hud.setHearts(0, 0);
+    this.hud.showMistakes(false);
     const rows = this.racers.map((r, i) => {
       const st = this.state[i];
       const chars = r.isPlayer ? this.typing.pos : r.progressChars;
@@ -260,6 +289,7 @@ export class RaceController {
       mode: this.mode,
       died: this.died ? { progress01: rows.find((r) => r.isPlayer).progress01 } : null,
       mpDeath: this.mpDeath, resets: this.resetCount,
+      hpMax: this.hpMax, hpLost: this.hpMax - this.hpLeft,
     };
     this.hud.onResults(this.results);
   }
@@ -320,5 +350,9 @@ export class RaceController {
 
   playerRank() { return this.state[0].rank ?? 1; }
 
-  dispose() { if (this.endTimer) clearTimeout(this.endTimer); }
+  dispose() {
+    if (this.endTimer) clearTimeout(this.endTimer);
+    this.hud.setHearts(0, 0);
+    this.hud.showMistakes(false);
+  }
 }

@@ -408,6 +408,8 @@ function backToMenu() {
   hud.setStartBusy(false);
   hud.centerMsg('');
   hud.setPaused(false);
+  hud.setHearts(0, 0);
+  hud.showMistakes(false);
   hud.showMirror(false);
   hud.updateCombo(0);
   hud.setSpeedGlow(0);
@@ -576,7 +578,7 @@ async function startRaceFlow() {
 
 /* shared tail of every race path (solo / bot / challenge / multiplayer):
  * world + theme lineup, typing engine, controller, HUD, countdown, GO */
-async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = null, mpDeath = false }) {
+async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = null, mpDeath = false, hpMax = 0 }) {
   // --- world + theme ---
   if (!world) world = new World($('scene'));
   world.finishMode = false;
@@ -615,7 +617,7 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
   if (!typing) typing = new TypingEngine(hud.els.typingText, $('typeInput'), {
     onKey: () => sound.key(),
     onBackspace: () => sound.key(),
-    onError: () => { sound.error(); hud.errorFlash(); race && race.notifyError(); hud.updateCombo(typing.combo); },
+    onError: (expected, typed) => { sound.error(); hud.errorFlash(); race && race.notifyError(expected, typed); hud.updateCombo(typing.combo); },
     onMilestone: (n) => {
       sound.finish(); // little fanfare
       world.pulse(0.7); // FOV kick + streak burst — progress feels like speed
@@ -632,7 +634,7 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
 
   // --- controller ---
   if (race) race.dispose();
-  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode, mpDeath });
+  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode, mpDeath, hpMax });
 
   // --- hud ---
   const colors = racers.map((r, i) => theme.vehicles[i]?.color ?? '#2e86ff');
@@ -841,11 +843,17 @@ let mpOpen = false;
 let mpBusy = false;
 let mpAcked = false; // client: the host's roster broadcast confirmed our hello
 let mpDeathOn = false; // 💀 death mode: a mistake throws you back to the start line
+let mpHpHearts = 0; // ❤️ hp mode: N mistakes forgiven before the start-line reset (mp)
 
 /* host picks (or a 'start' carries) an environment — everyone rebuilds the
  * same world, so the lobby preview AND the race look identical everywhere */
-function applyMpEnv(theme, tod, death) {
-  if (death !== undefined) mpDeathOn = !!death;
+function applyMpEnv(theme, tod, death, hp) {
+  // one select drives both: hp>0 = hearts, 'death' = strict reset on 1st mistake
+  if (hp !== undefined && hp > 0) { mpHpHearts = Math.min(3, hp); mpDeathOn = false; }
+  else if (death !== undefined || hp !== undefined) { mpHpHearts = 0; mpDeathOn = !!death; }
+  const sel = $('mpHpMode');
+  if (sel && (death !== undefined || hp !== undefined))
+    sel.value = mpHpHearts ? String(mpHpHearts) : (mpDeathOn ? 'death' : 'off');
   if (race || phase !== 'menu') return; // never re-theme mid-race
   let changed = false;
   if (theme && THEMES[theme]?.status === 'live' && theme !== currentThemeId) {
@@ -889,6 +897,7 @@ function updateMpEnvLine() {
   if (show) {
     const t = THEMES[currentThemeId];
     el.textContent = `🗺 environment: ${t?.icon ?? ''} ${t?.name ?? currentThemeId} · ${settings.timeOfDay} — the host's choice`
+      + (mpHpHearts ? ` · ❤️ hp: ${mpHpHearts} heart${mpHpHearts > 1 ? 's' : ''}` : '')
       + (mpDeathOn ? ' · 💀 death mode ON' : '');
   }
 }
@@ -946,7 +955,7 @@ function showMpWait() {
     // is already showing it, so guests joining see exactly this
     $('mpEnvTheme').value = currentThemeId;
     $('mpEnvTod').value = settings.timeOfDay;
-    $('mpDeathMode').checked = mpDeathOn;
+    $('mpHpMode').value = mpHpHearts ? String(mpHpHearts) : (mpDeathOn ? 'death' : 'off');
   } else {
     updateMpEnvLine();
   }
@@ -1021,7 +1030,7 @@ async function mpHostStart() {
     }
     setMpStatus('');
     // the host's environment travels with the start (late joiners included)
-    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay, death: mpDeathOn });
+    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay, death: mpDeathOn, hp: mpHpHearts });
     await mpLaunch({ text, source, raceId });
   } catch (e) {
     setMpStatus('could not start: ' + e.message, true);
@@ -1047,7 +1056,7 @@ async function mpLaunch({ text, source, raceId }) {
           ? { ...GARAGE_DEFAULTS[currentThemeId], ...p.garage[currentThemeId], variant: p.garage[currentThemeId].model ?? 0 }
           : null,
       })),
-  }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null, mpDeath: mpDeathOn });
+  }, { mode: 'mp', difficulty: 'real', myName: null, myWpm: null, mpDeath: mpDeathOn, hpMax: mpHpHearts });
 }
 
 /* fresh self state read at SEND time (background tabs throttle rAF — the
@@ -1071,12 +1080,12 @@ mpOn('players', () => {
   }
   rebuildRoomLineup(); // lobby backdrop = the live room lineup
 });
-mpOn('env', ({ theme, tod, death }) => {
-  applyMpEnv(theme, tod, death);
+mpOn('env', ({ theme, tod, death, hp }) => {
+  applyMpEnv(theme, tod, death, hp);
   updateMpEnvLine();
 });
 mpOn('start', (msg) => {
-  applyMpEnv(msg.theme, msg.tod, msg.death); // belt-and-braces: late joiners still match
+  applyMpEnv(msg.theme, msg.tod, msg.death, msg.hp); // belt-and-braces: late joiners still match
   mpLaunch(msg);
 });
 mpOn('status', ({ msg, error }) => { if (mpOpen) setMpStatus(msg, error); });
@@ -1120,14 +1129,15 @@ $('mpStartBtn').addEventListener('click', mpHostStart);
  * change applies locally through the SAME 'env' path guests use */
 const mpPushEnv = () => {
   const theme = $('mpEnvTheme').value, tod = $('mpEnvTod').value;
-  const death = $('mpDeathMode').checked;
-  applyMpEnv(theme, tod, death);
-  mpSendEnv(theme, tod, death);
+  const v = $('mpHpMode').value;
+  const death = v === 'death', hearts = ['1', '2', '3'].includes(v) ? Number(v) : 0;
+  applyMpEnv(theme, tod, death, hearts);
+  mpSendEnv(theme, tod, death, hearts);
   updateMpEnvLine();
 };
 $('mpEnvTheme').addEventListener('change', mpPushEnv);
 $('mpEnvTod').addEventListener('change', mpPushEnv);
-$('mpDeathMode').addEventListener('change', mpPushEnv);
+$('mpHpMode').addEventListener('change', mpPushEnv);
 /* garage inside the room — same showroom, closing returns to the lobby */
 $('mpGarageBtn').addEventListener('click', openGarage);
 

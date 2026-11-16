@@ -57,7 +57,7 @@ let code = null;
 let myName = 'YOU';
 let selfId = null;
 let roster = new Map(); // id -> { name, garage } (host's source of truth)
-let envState = { theme: null, tod: null, death: false }; // last host-picked environment + death mode
+let envState = { theme: null, tod: null, death: false, hp: 0 }; // last host-picked environment + hp mode
 let lastProgress = new Map(); // id -> { pos, wpm, finished, time, acc }
 let selfState = { pos: 0, wpm: 0, finished: false, time: null, acc: 95 };
 let racing = false;
@@ -160,7 +160,7 @@ function wireHost() {
         const name = String(msg.name || 'guest').slice(0, 14) || 'guest';
         roster.set(conn.peer, { name, garage: msg.garage ?? null });
         // the newcomer missed earlier env picks — send the current one now
-        if (envState.theme) hostBroadcast({ t: 'env', theme: envState.theme, tod: envState.tod, death: envState.death });
+        if (envState.theme) hostBroadcast({ t: 'env', theme: envState.theme, tod: envState.tod, death: envState.death, hp: envState.hp ?? 0 });
         hostBroadcast({ t: 'players', players: mpPlayers() });
         emit('players', mpPlayers());
         emit('status', { msg: `${name} joined` });
@@ -289,9 +289,9 @@ export async function joinRoom(roomCode, name, garage = null) {
       roster = new Map(msg.players.map((p) => [p.id, { name: p.name, garage: p.garage ?? null }]));
       emit('players', mpPlayers());
     } else if (msg?.t === 'env') {
-      emit('env', { theme: msg.theme, tod: msg.tod, death: !!msg.death });
+      emit('env', { theme: msg.theme, tod: msg.tod, death: !!msg.death, hp: Math.max(0, Math.min(3, (msg.hp ?? 0) | 0)) });
     } else if (msg?.t === 'start') {
-      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId, theme: msg.theme, tod: msg.tod, death: !!msg.death });
+      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId, theme: msg.theme, tod: msg.tod, death: !!msg.death, hp: Math.max(0, Math.min(3, (msg.hp ?? 0) | 0)) });
     } else if (msg?.t === 'snap') {
       emit('snap', msg.rows ?? []);
     } else if (msg?.t === 'left') {
@@ -327,16 +327,16 @@ function clientSelfSnap() {
  * joiners, flaky relays) still race in the host's environment. */
 export function startRace(text, source, raceId, env = null) {
   if (!isHost) return;
-  if (env?.theme) envState = { theme: env.theme, tod: env.tod ?? null, death: !!env.death };
-  hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod, death: envState.death });
+  if (env?.theme) envState = { theme: env.theme, tod: env.tod ?? null, death: !!env.death, hp: Math.max(0, Math.min(3, (env.hp ?? 0) | 0)) };
+  hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod, death: envState.death, hp: envState.hp });
 }
 
 /* host picks a new environment mid-lobby — broadcast for the live preview */
-export function sendEnv(theme, tod, death = false) {
+export function sendEnv(theme, tod, death = false, hp = 0) {
   if (!isHost) return;
-  envState = { theme, tod, death: !!death };
-  hostBroadcast({ t: 'env', theme, tod, death: envState.death });
-  emit('env', { theme, tod, death: envState.death }); // the host's own screen applies the same way
+  envState = { theme, tod, death: !!death, hp: Math.max(0, Math.min(3, hp | 0)) };
+  hostBroadcast({ t: 'env', theme, tod, death: envState.death, hp: envState.hp });
+  emit('env', { theme, tod, death: envState.death, hp: envState.hp }); // the host's own screen applies the same way
 }
 
 /* garage changed while in a room — host updates the roster directly,
@@ -382,7 +382,7 @@ export async function teardown() {
   selfId = null;
   roster = new Map();
   lastProgress = new Map();
-  envState = { theme: null, tod: null, death: false };
+  envState = { theme: null, tod: null, death: false, hp: 0 };
 }
 
 /* debug handle (devtools / test harness) */

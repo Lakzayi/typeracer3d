@@ -179,12 +179,12 @@ export class TypingEngine {
       this.bufferEls.push(el);
       this._paintCaret();
       this._scrollToCaret();
-      this.hooks.onError && this.hooks.onError(ch);
+      this.hooks.onError && this.hooks.onError(this.text[this.pos], ch);
     } else {
       // arcade: error, no stick
       this.errors++;
       this.combo = 0;
-      this.hooks.onError && this.hooks.onError(ch);
+      this.hooks.onError && this.hooks.onError(this.text[this.pos], ch);
     }
   }
 

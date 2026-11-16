@@ -61,6 +61,11 @@
   <!-- ============ RACE HUD ============ -->
   <div id="hud" class="hidden">
     <div id="dataBadge" class="glass"></div>
+    <div id="hpHearts" class="hidden"></div>
+    <div id="mistakePanel" class="glass hidden">
+      <div class="mpHead">💀 worst keys</div>
+      <div id="mistakeBars"></div>
+    </div>
 
     <div id="statsPanel" class="glass">
       <div id="rankBig">–</div>
@@ -368,7 +373,13 @@
               <option value="custom">✍️ custom text</option>
             </select>
           </div>
-          <label class="mpDeath"><input type="checkbox" id="mpDeathMode"> 💀 death mode — a mistake sends you back to the start line</label>
+          <label class="mpDeath">💀 hp mode: <select id="mpHpMode">
+            <option value="off">off — mistakes are free</option>
+            <option value="death">death — the 1st mistake resets you</option>
+            <option value="1">❤️ 1 heart</option>
+            <option value="2">❤️ 2 hearts</option>
+            <option value="3">❤️ 3 hearts</option>
+          </select> — run out of hearts and you go back to the start line</label>
           <textarea id="mpCustomText" class="mpInput hidden" rows="3" placeholder="paste the text everyone will type…"></textarea>
           <button id="mpStartBtn">🏁 start the race</button>
         </div>

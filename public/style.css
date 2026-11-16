@@ -946,3 +946,52 @@ details.help[open] summary::after { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ── ❤️ hp mode: hearts above the typing panel (where the eyes already are) ── */
+#hpHearts {
+  position: absolute; bottom: 188px; left: 50%; transform: translateX(-50%);
+  font-size: 28px; letter-spacing: 7px; line-height: 1; pointer-events: none;
+  filter: drop-shadow(0 0 10px rgba(255, 92, 107, 0.5));
+}
+#hpHearts .hpHeart { color: #ff5c6b; }
+#hpHearts .hpHeart.lost { color: rgba(255, 255, 255, 0.18); filter: none; }
+#hpHearts .hpHeart.hurt { display: inline-block; animation: heartHurt 0.45s var(--spring); }
+@keyframes heartHurt { from { transform: scale(1.8); } }
+
+/* ── the mistake popup: the expected char slides in green from the RIGHT,
+   the typed char rises in red from the LEFT — one glance shows what went wrong ── */
+.mistakePop {
+  position: fixed; z-index: 60; pointer-events: none;
+  font-family: var(--mono); font-size: 26px; font-weight: 700;
+  animation: mpFade 0.95s ease-out forwards;
+}
+.mistakePop .exp { color: #57d9a3; text-shadow: 0 0 12px rgba(87, 217, 163, 0.65); display: inline-block; animation: mpExp 0.32s var(--spring) both; }
+.mistakePop .got { color: #ff5c6b; text-shadow: 0 0 12px rgba(255, 92, 107, 0.65); display: inline-block; margin-left: 12px; animation: mpGot 0.32s var(--spring) both; }
+@keyframes mpExp { from { transform: translateX(36px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes mpGot { from { transform: translate(-30px, 22px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes mpFade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ── 💀 worst-keys panel (death/hp races): top-5 mistake pairs, counted,
+   sorted column chart — count on top, bar in the middle, expected→typed below ── */
+#mistakePanel {
+  position: absolute; top: 178px; left: 16px; width: 172px;
+  padding: 10px 12px; border-radius: var(--r-md);
+}
+#mistakePanel .mpHead { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+#mistakeBars { display: flex; align-items: flex-end; gap: 7px; height: 58px; }
+.mCol { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 3px; min-width: 0; }
+.mCount { font-size: 11px; font-weight: 800; color: #ff5c6b; line-height: 1; }
+.mBar { width: 100%; max-width: 22px; border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(180deg, #ff5c6b, #b2263a); box-shadow: 0 0 8px rgba(255, 92, 107, 0.35);
+  animation: mBarUp 0.25s var(--spring); }
+@keyframes mBarUp { from { transform: scaleY(0.2); transform-origin: bottom; } }
+.mKey { font-size: 9.5px; font-weight: 700; line-height: 1; white-space: nowrap; color: var(--dim); }
+.mKey .mExp { color: #57d9a3; }
+.mKey .mGot { color: #ff5c6b; }
+
+/* hp select in the lobby — same look as the env selects */
+#mpHpMode {
+  padding: 4px 8px; border-radius: 8px;
+  font-family: var(--font); font-size: 12px; font-weight: 650; color: var(--text);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+}
