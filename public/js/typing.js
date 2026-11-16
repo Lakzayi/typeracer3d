@@ -51,7 +51,8 @@ export class TypingEngine {
       .replace(/[—–―‒−]/g, '-')
       .replace(/['’‚]/g, "'")
       .replace(/[“”„]/g, '"')
-      .replace(/\u00A0/g, ' ');
+      .replace(/\u00A0/g, ' ')
+      .replace(/\u200D/g, '\u200C'); // ZWJ -> ZWNJ: same half-space, typed the same
     this.pos = 0; this.correct = 0; this.errors = 0;
     this.buffer = []; this.bufferEls = [];
     this.combo = 0; this.maxCombo = 0; this._nextMilestone = 0;
@@ -102,8 +103,16 @@ export class TypingEngine {
 
   _keydown(e) {
     if (!this.enabled) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const key = e.key;
+
+    /* Persian half-space (ZWNJ, U+200C): on the standard Windows layout it
+     * is Ctrl+Shift+2, so the Ctrl/Meta/Alt guard below must not swallow it.
+     * Some keyboard drivers report the key as 'Process' instead of the
+     * character - fall back to Ctrl/Meta + Shift + Digit2. Every other
+     * Ctrl/Meta/Alt combo stays a browser shortcut (Ctrl+R, Ctrl+W...). */
+    const zwnj = key === '\u200C'
+      || (key === 'Process' && (e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit2');
+    if (!zwnj && (e.ctrlKey || e.metaKey || e.altKey)) return;
 
     if (key === 'Backspace') {
       if (this.mode !== 'realistic' || this.buffer.length === 0) return;
@@ -121,7 +130,7 @@ export class TypingEngine {
      * error that realistic mode would then demand a backspace for */
     if (key === 'Enter') {
       if (this.text[this.pos] !== '\n') return;
-    } else if (key.length !== 1) return; // ignore Shift, arrows, etc.
+    } else if (!zwnj && key.length !== 1) return; // ignore Shift, arrows, etc.
     e.preventDefault(); // keep space from scrolling, ' from quick-find
     if (this.finishedAt) return;
 
@@ -130,7 +139,7 @@ export class TypingEngine {
       this.hooks.onStart && this.hooks.onStart();
     }
 
-    const ch = key === 'Enter' ? '\n' : key;
+    const ch = key === 'Enter' ? '\n' : key === 'Process' ? '\u200C' : key;
     const expected = this.text[this.pos];
 
     if (!this.blocked && ch === expected) {
