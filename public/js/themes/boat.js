@@ -538,6 +538,106 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const reeds = new THREE.Mesh(mergeStaticMeshes(reedMeshes), reedMat);
   group.add(reeds);
 
+  /* ---------- pine shore: conifers, boulders, driftwood, stilt huts ---------- */
+  // r15: reeds alone left the banks bare — a pine treeline plus scattered
+  // boulders gives the river a forested feel, and three stilt fishing huts
+  // add a human touch. Everything grounded on the bank via bankY.
+  const pineTrunkParts = [], pineCrownParts = [];
+  const pineTrunkMat = new THREE.MeshStandardMaterial({ color: '#5a4030', roughness: 1, envMapIntensity: 0.15 });
+  const pineCrownMat = new THREE.MeshStandardMaterial({ color: '#2e5a3a', roughness: 1, flatShading: true, envMapIntensity: 0.15 });
+  for (let i = 0; i < 54; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const px = side * (11 + rng() * 26);
+    const pz = 15 - rng() * (TRACK_LENGTH + 40);
+    const gy = bankY(px, pz);
+    const th = 1.6 + rng() * 1.6;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, th, 6));
+    trunk.position.set(px, gy + th / 2, pz);
+    trunk.rotation.y = rng() * 3;
+    pineTrunkParts.push(trunk);
+    let cy = gy + th * 0.75;
+    for (let c = 0; c < 3; c++) {
+      const cr = 1.15 - c * 0.32;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(cr, 1.5 - c * 0.25, 7));
+      cone.position.set(px, cy + 0.7, pz);
+      cone.rotation.y = rng() * 3;
+      pineCrownParts.push(cone);
+      cy += 0.85 - c * 0.15;
+    }
+  }
+  const pineTrunks = new THREE.Mesh(mergeStaticMeshes(pineTrunkParts), pineTrunkMat);
+  pineTrunks.castShadow = true;
+  group.add(pineTrunks);
+  const pineCrowns = new THREE.Mesh(mergeStaticMeshes(pineCrownParts), pineCrownMat);
+  pineCrowns.castShadow = true;
+  group.add(pineCrowns);
+
+  // bank boulders — grounded, half sunk
+  const bankBoulderMat = new THREE.MeshStandardMaterial({ color: '#7d7a72', roughness: 1, flatShading: true, envMapIntensity: 0.15 });
+  const bankBoulderParts = [];
+  for (let i = 0; i < 16; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const bx = side * (8.6 + rng() * 18);
+    const bz = 10 - rng() * (TRACK_LENGTH + 30);
+    const s = 0.5 + rng() * 1.3;
+    const rock = new THREE.Mesh(jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.22, seed: 900 + i, freq: 2.6 }), bankBoulderMat);
+    rock.position.set(bx, 0.35 + bankY(bx, bz) + s * 0.5, bz);
+    rock.rotation.y = rng() * 3;
+    bankBoulderParts.push(rock);
+  }
+  const bankBoulders = new THREE.Mesh(mergeStaticMeshes(bankBoulderParts), bankBoulderMat);
+  bankBoulders.castShadow = true;
+  group.add(bankBoulders);
+
+  // driftwood logs washed up on the bank
+  const driftMat = new THREE.MeshStandardMaterial({ color: '#7a6448', roughness: 1, envMapIntensity: 0.15 });
+  const driftParts = [];
+  for (let i = 0; i < 10; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const dx = side * (8.4 + rng() * 6);
+    const dz = 8 - rng() * (TRACK_LENGTH + 20);
+    const dl = 1.6 + rng() * 2.2;
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, dl, 6), driftMat);
+    log.rotation.z = Math.PI / 2;
+    log.rotation.y = rng() * 3;
+    log.position.set(dx, 0.35 + bankY(dx, dz) + 0.18, dz);
+    driftParts.push(log);
+  }
+  const driftwood = new THREE.Mesh(mergeStaticMeshes(driftParts), driftMat);
+  driftwood.castShadow = true;
+  group.add(driftwood);
+
+  // stilt fishing huts — box + cone roof on 4 legs over the bank
+  const hutWoodMat = new THREE.MeshStandardMaterial({ color: '#6e5138', roughness: 1, envMapIntensity: 0.15 });
+  const hutRoofMat = new THREE.MeshStandardMaterial({ color: '#4a3424', roughness: 1, envMapIntensity: 0.15 });
+  for (let i = 0; i < 3; i++) {
+    const side = i % 2 ? 1 : -1;
+    const hx = side * (10.5 + rng() * 4);
+    const hz = -80 - i * (TRACK_LENGTH / 3) - rng() * 40;
+    const gy = bankY(hx, hz);
+    const hutParts = [], roofParts = [];
+    const hw = 2.6, hd = 3.2, hh = 2.2;
+    const hut = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd));
+    hut.position.set(hx, gy + 1.5 + hh / 2, hz);
+    hut.rotation.y = (rng() - 0.5) * 0.4;
+    hutParts.push(hut);
+    for (const [lx, lz] of [[-1, -1.3], [1, -1.3], [-1, 1.3], [1, 1.3]]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.7, 0.18));
+      leg.position.set(hx + lx, gy + 0.8, hz + lz);
+      hutParts.push(leg);
+    }
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(hw * 0.95, 1.3, 4));
+    roof.position.set(hx, gy + 1.5 + hh + 0.65, hz);
+    roof.rotation.y = Math.PI / 4 + hut.rotation.y;
+    roofParts.push(roof);
+    const hutMesh = new THREE.Mesh(mergeStaticMeshes(hutParts), hutWoodMat);
+    hutMesh.castShadow = true;
+    group.add(hutMesh);
+    const roofMesh = new THREE.Mesh(mergeStaticMeshes(roofParts), hutRoofMat);
+    roofMesh.castShadow = true;
+    group.add(roofMesh);
+  }
+
   // buoys as lane dividers — TWO InstancedMeshes (bodies with per-instance
   // red/white color + poles). 152 buoys were 304 draw calls as Groups (3.6× the
   // §1.3 budget); instanced they are 2. Bobbing is re-composed per frame with

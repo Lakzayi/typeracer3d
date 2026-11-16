@@ -458,65 +458,11 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   atmo.position.copy(earth.position);
   group.add(atmo);
 
-  // launch-complex ground far below the strip — horizon context so the rocks
-  // don't float in an empty gradient (critic r5). r10: olive-tan terrain like
-  // the real-day-launch photo foreground, not navy (r10 #2). r11: macro
-  // patches (scrub vs sandy clearings) so it stops reading as one flat olive
-  const terrainPBR = makeGroundPBR({
-    seed: 43, octaves: 5, firstLattice: 3, gain: 0.55, normalStrength: 2.0,
-    color: rampHex(['#3e4a2e', '#55603a', '#63683c', '#4a5230']),
-    rough: (h) => 0.9 + h * 0.08,
-    macro: {
-      seed: 437, firstLattice: 2, amount: 0.35,
-      color: rampHex(['#5a5c36', '#8a8256', '#6e7040']),
-    },
-  });
-  terrainPBR.map.repeat.set(48, 72);
-  terrainPBR.normalMap.repeat.set(48, 72);
-  terrainPBR.roughMap.repeat.set(48, 72);
-  // r11: low rolling hills on the far terrain — the r10 ground/sky junction
-  // was one dead-straight line across the whole shot (photo tell). No props
-  // sit on this plane (asteroids float), so displacement is free of grounding.
-  // r12 iterate: amp 4.5→9 + wider cells — the r11 hills were too subtle to
-  // break the straight horizon at chase-cam grazing angle
-  const groundDunes = makeDunes(4300, { cell: 260, octaves: 3, gain: 0.55 });
-  const groundFade = (x) => { // flat under the strip, rolling beyond its edge
-    const t = Math.min(1, Math.max(0, (Math.abs(x) - 9) / 26));
-    return t * t * (3 - 2 * t);
-  };
-  const groundGeo = new THREE.PlaneGeometry(1600, 2400, 64, 96);
-  displaceGroundPlane(groundGeo, groundDunes, { amp: 9, fadeFn: groundFade });
-  const launchGround = new THREE.Mesh(
-    groundGeo,
-    new THREE.MeshStandardMaterial({
-      color: '#ffffff', map: terrainPBR.map, normalMap: terrainPBR.normalMap,
-      roughnessMap: terrainPBR.roughMap, roughness: 1, envMapIntensity: 0.2,
-    })
-  );
-  launchGround.rotation.x = -Math.PI / 2;
-  launchGround.position.set(0, -14, -TRACK_LENGTH / 2);
-  launchGround.receiveShadow = true;
-  group.add(launchGround);
-
-  // ground boulders — half-sunk into the rolling terrain (r12: anchors the
-  // foreground the way the critic's "dark rocks hover unsupported in mid-sky"
-  // note demanded; the floaters above are pushed far out and low instead)
-  const boulderMat = new THREE.MeshStandardMaterial({ color: '#5c6470', roughness: 1, flatShading: true });
-  const boulderParts = [];
-  for (let i = 0; i < 14; i++) {
-    const side = i % 2 ? 1 : -1;
-    const bx = side * (10.5 + rng() * 15);
-    const bz = 10 - rng() * (TRACK_LENGTH + 40);
-    const s = 0.7 + rng() * 1.9;
-    const rock = new THREE.Mesh(jitterRock(new THREE.DodecahedronGeometry(s, 0), { amp: 0.3, seed: 90 + i, freq: 2.6 }), boulderMat);
-    const gy = (groundDunes(bx, bz) - 0.5) * 2 * 9 * groundFade(bx);
-    rock.position.set(bx, -14 + gy + s * 0.55, bz);
-    rock.rotation.set(rng() * 3, rng() * 3, rng() * 3);
-    boulderParts.push(rock);
-  }
-  const boulders = new THREE.Mesh(mergeStaticMeshes(boulderParts), boulderMat);
-  boulders.castShadow = true;
-  group.add(boulders);
+  /* ---------- real space below ---------- */
+  // r14: the olive launch-complex terrain plane is GONE — with the chase cam
+  // grazing over the strip it read as an ordinary ground plane and killed the
+  // space fantasy ("it has a ground, it is not really space"). The pad now
+  // floats in the void: Earth below, stars around, nothing else.
 
   /* ---------- ring gates ---------- */
   // ONE InstancedMesh + per-instance color (alternating teal/steel) instead of
@@ -555,12 +501,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     for (let i = 0; i < AST_N; i++) {
       const s = 0.5 + rng() * 3.2;
       const side = rng() > 0.5 ? 1 : -1;
-      // r12 (critic r11 LOW #5: dark rocks hover unsupported in mid-sky):
-      // floaters now hug a LOW band far from the strip (read as horizon debris)
-      // and only every 5th drifts high; the foreground is anchored by the
-      // half-sunk ground boulders instead
-      astX[i] = side * (18 + rng() * 52);
-      astY[i] = (i % 5 === 0) ? 8 + rng() * 14 : -3 + rng() * 10;
+      // r14: the ground plane is gone — asteroids now OWN the void and spread
+      // freely through the altitude band instead of hugging a horizon line
+      astX[i] = side * (16 + rng() * 64);
+      astY[i] = -8 + rng() * 30;
       astZ[i] = 16 - rng() * (TRACK_LENGTH + 60);
       astS[i] = s;
       astRX[i] = rng() * 3; astRY[i] = rng() * 3;
@@ -572,6 +516,71 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     }
   }
   group.add(asteroids);
+
+  /* ---------- satellites + a little moon + service pylons ---------- */
+  // real-space dressing now that the terrain is gone: two satellites with
+  // solar wings, a cratered moon opposite Earth, and under-strip truss pylons
+  // with cyan markers so the highway reads as engineered, floating in the void
+  const satBodyMat = new THREE.MeshStandardMaterial({ color: '#c9ccd4', roughness: 0.4, metalness: 0.6 });
+  const panelMat = new THREE.MeshStandardMaterial({ color: '#1e3f66', roughness: 0.35, metalness: 0.3, emissive: '#0a1f3a', emissiveIntensity: 0.4 });
+  const satBodyParts = [], panelParts = [];
+  for (let i = 0; i < 2; i++) {
+    const side = i % 2 ? 1 : -1;
+    const sx = side * (26 + rng() * 18);
+    const sy = 10 + rng() * 8;
+    const sz = -60 - i * (TRACK_LENGTH / 2);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 2.2));
+    body.position.set(sx, sy, sz);
+    body.rotation.y = rng() * 3;
+    satBodyParts.push(body);
+    const dish = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.4, 10));
+    dish.position.set(sx, sy + 0.9, sz);
+    satBodyParts.push(dish);
+    for (const ps of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.06, 1.1));
+      wing.position.set(sx + ps * 2.0, sy, sz);
+      wing.rotation.y = body.rotation.y;
+      panelParts.push(wing);
+    }
+  }
+  const satBodies = new THREE.Mesh(mergeStaticMeshes(satBodyParts), satBodyMat);
+  satBodies.castShadow = true;
+  group.add(satBodies);
+  const satPanels = new THREE.Mesh(mergeStaticMeshes(panelParts), panelMat);
+  group.add(satPanels);
+
+  // small cratered moon riding opposite Earth — depth cue for the void
+  const moon = new THREE.Mesh(
+    new THREE.SphereGeometry(60, 24, 18),
+    new THREE.MeshStandardMaterial({ color: '#9a9aa2', roughness: 1, envMapIntensity: 0.2, flatShading: true })
+  );
+  moon.position.set(-170, 95, -TRACK_LENGTH - 220);
+  group.add(moon);
+
+  // under-strip truss pylons: the highway floats, but it reads as BUILT
+  const pylonMat = new THREE.MeshStandardMaterial({ color: '#2e3850', roughness: 0.8, metalness: 0.3 });
+  const pylonTipMat = new THREE.MeshBasicMaterial({ color: '#4fd8ff' });
+  const pylonParts = [], pylonTips = [];
+  const PYLON_N = Math.ceil(TRACK_LENGTH / 55);
+  for (let i = 0; i < PYLON_N; i++) {
+    const pz = 10 - i * 55;
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.6, 0.3));
+      leg.position.set(side * 6.6, -1.3, pz);
+      leg.rotation.z = side * 0.5;
+      pylonParts.push(leg);
+      const cross = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.16, 0.16));
+      cross.position.set(side * 7.2, -1.4, pz);
+      pylonParts.push(cross);
+    }
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5));
+    tip.position.set(0, -1.6, pz);
+    pylonTips.push(tip);
+  }
+  const pylons = new THREE.Mesh(mergeStaticMeshes(pylonParts), pylonMat);
+  group.add(pylons);
+  const pylonGlow = new THREE.Mesh(mergeStaticMeshes(pylonTips), pylonTipMat);
+  group.add(pylonGlow);
 
   /* ---------- holo signs ---------- */
   const slogans = ['TYPE FASTER!', 'WPM > gravity', 'Orbit Dash', '🚤 boats SOON', '🐎 horses SOON', 'to infinity…'];

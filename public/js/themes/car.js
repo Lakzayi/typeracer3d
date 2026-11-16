@@ -617,6 +617,69 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   group.add(trunkMesh, crownMesh);
   trunks.dispose(); crowns.dispose(); trunkGeo.dispose(); crownGeo.dispose();
 
+  /* ---------- city skyline: blocks, towers, window bands ---------- */
+  // r15: the meadows alone felt empty — mid-distance building blocks with
+  // lit window bands give the highway a destination. 3 facade palettes +
+  // one emissive window mesh; the whole skyline costs 4 draw calls.
+  const facadeParts = [[], [], []];
+  const windowParts = [];
+  const facadeMats = [
+    new THREE.MeshStandardMaterial({ color: '#8d949e', roughness: 0.95 }),
+    new THREE.MeshStandardMaterial({ color: '#a8a091', roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: '#6f7a86', roughness: 0.95 }),
+  ];
+  const windowMat = new THREE.MeshStandardMaterial({ color: '#1d242e', emissive: '#ffdf9e', emissiveIntensity: 0.55, roughness: 1 });
+  for (let i = 0; i < 22; i++) {
+    const side = i % 2 ? 1 : -1;
+    const bx = side * (24 + rng() * 46);
+    const bz = -20 - rng() * (TRACK_LENGTH + 40);
+    const tower = rng() > 0.82;
+    const w = 7 + rng() * 9;
+    const d = 7 + rng() * 9;
+    const h = tower ? 22 + rng() * 16 : 6 + rng() * 10;
+    const fi = i % 3;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d));
+    body.position.set(bx, h / 2 - 0.5, bz);
+    body.rotation.y = (rng() - 0.5) * 0.5;
+    facadeParts[fi].push(body);
+    if (tower) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 0.45, 2.4, d * 0.45));
+      cap.position.set(bx, h + 1.2, bz);
+      cap.rotation.y = body.rotation.y;
+      facadeParts[fi].push(cap);
+    }
+    // horizontal window bands on the track-facing side
+    const bands = Math.max(2, Math.floor(h / 3.2));
+    for (let b = 0; b < bands; b++) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(w * 0.82, 0.7, 0.1));
+      band.position.set(bx, 1.6 + b * 3.2, bz + (d / 2 + 0.06) * Math.cos(body.rotation.y));
+      band.rotation.y = body.rotation.y;
+      windowParts.push(band);
+    }
+  }
+  for (let fi = 0; fi < 3; fi++) {
+    if (!facadeParts[fi].length) continue;
+    const mesh = new THREE.Mesh(mergeStaticMeshes(facadeParts[fi]), facadeMats[fi]);
+    mesh.castShadow = true;
+    group.add(mesh);
+  }
+  const windows = new THREE.Mesh(mergeStaticMeshes(windowParts), windowMat);
+  group.add(windows);
+
+  /* ---------- roadwork: traffic cones hugging the shoulder ---------- */
+  const coneMat = new THREE.MeshStandardMaterial({ color: '#ff7a1f', roughness: 0.8 });
+  const coneParts = [];
+  for (let i = 0; i < 26; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const cz = 6 - rng() * (TRACK_LENGTH + 10);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 7), coneMat);
+    cone.position.set(side * 7.1, 0.28, cz);
+    coneParts.push(cone);
+  }
+  const cones = new THREE.Mesh(mergeStaticMeshes(coneParts), coneMat);
+  cones.castShadow = true;
+  group.add(cones);
+
   const rocks = new THREE.InstancedMesh(
     jitterRock(new THREE.DodecahedronGeometry(0.7), { amp: 0.3, seed: 55, freq: 3.5 }),
     new THREE.MeshStandardMaterial({ color: '#8d9298', roughness: 1 }),

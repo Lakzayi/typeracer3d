@@ -463,6 +463,170 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   desertRocks.castShadow = true;
   group.add(desertRocks);
 
+  /* ---------- wild-west settlement: ranch houses, barn, water tower ---------- */
+  // everything merges into THREE meshes by material (wood / barn red / dark
+  // trim) — the whole town costs 3 draw calls (§1.3). Every prop is grounded
+  // on the dune field via duneY.
+  const woodMat = new THREE.MeshStandardMaterial({ color: '#8a6a44', roughness: 1, envMapIntensity: 0.15 });
+  const barnMat = new THREE.MeshStandardMaterial({ color: '#9a4a3a', roughness: 1, envMapIntensity: 0.15 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: '#3d2c1c', roughness: 1, envMapIntensity: 0.15 });
+  const townWood = [], townBarn = [], townTrim = [];
+  for (let i = 0; i < 6; i++) {
+    const side = i % 2 ? 1 : -1;
+    const hx = side * (13.5 + rng() * 11);
+    const hz = -20 - i * (TRACK_LENGTH / 6) - rng() * 30;
+    const gy = duneY(hx, hz);
+    const barn = i === 0;
+    const w = barn ? 7 + rng() * 2 : 4.5 + rng() * 2.5;
+    const d = barn ? 9 + rng() * 3 : 5 + rng() * 2.5;
+    const h = 3 + rng() * 1.6;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, d));
+    body.position.set(hx, gy + h / 2, hz);
+    body.rotation.y = (rng() - 0.5) * 0.3;
+    (barn ? townBarn : townWood).push(body);
+    // gable roof: two slanted slabs meeting at a ridge
+    const rh = 1.8 + rng() * 0.8, roofLen = Math.hypot(w / 2, rh);
+    for (const s of [-1, 1]) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(roofLen + 0.3, 0.14, d + 0.3));
+      slab.rotation.z = s * Math.atan2(rh, w / 2);
+      slab.position.set(hx + s * w / 4, gy + h + rh / 2, hz + slab.position.z);
+      slab.rotation.y = body.rotation.y;
+      townTrim.push(slab);
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.9, 0.12));
+    door.position.set(hx, gy + 0.95, hz + d / 2 + 0.07);
+    townTrim.push(door);
+    // porch posts + awning facing the track
+    for (const ps of [-1, 1]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 2.2, 0.14));
+      post.position.set(hx + ps * (w / 2 - 0.3), gy + 1.1, hz + d / 2 + 0.9);
+      townTrim.push(post);
+    }
+    const awn = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 1.8));
+    awn.position.set(hx, gy + 2.3, hz + d / 2 + 0.6);
+    townTrim.push(awn);
+  }
+  // water towers — tank on 4 legs with a cone cap
+  for (let i = 0; i < 2; i++) {
+    const side = i % 2 ? 1 : -1;
+    const tx = side * (11 + rng() * 6);
+    const tz = -70 - i * (TRACK_LENGTH / 2) - rng() * 40;
+    const gy = duneY(tx, tz);
+    const th = 3.6 + rng() * 0.8;
+    for (const [lx, lz] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, th, 0.16));
+      leg.position.set(tx + lx, gy + th / 2, tz + lz);
+      leg.rotation.z = lx * 0.08; leg.rotation.x = -lz * 0.08;
+      townTrim.push(leg);
+    }
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 2.2, 10));
+    tank.position.set(tx, gy + th + 1.1, tz);
+    townWood.push(tank);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(1.7, 0.9, 10));
+    cap.position.set(tx, gy + th + 2.6, tz);
+    townTrim.push(cap);
+  }
+  // barrels + crates scattered along the trail
+  for (let i = 0; i < 16; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const bx = side * (8.8 + rng() * 10);
+    const bz = 8 - rng() * (TRACK_LENGTH + 20);
+    const gy = duneY(bx, bz);
+    if (rng() > 0.5) {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.85, 8));
+      barrel.position.set(bx, gy + 0.42, bz);
+      barrel.rotation.y = rng() * 3;
+      townWood.push(barrel);
+    } else {
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7));
+      crate.position.set(bx, gy + 0.35, bz);
+      crate.rotation.y = rng() * 3;
+      townWood.push(crate);
+    }
+  }
+  // flatbed wagons — bed + 4 spoked wheels + tongue
+  for (let i = 0; i < 2; i++) {
+    const side = i % 2 ? 1 : -1;
+    const wx = side * (10 + rng() * 5);
+    const wz = -120 - i * (TRACK_LENGTH / 2) - rng() * 50;
+    const gy = duneY(wx, wz);
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.55, 2.8));
+    bed.position.set(wx, gy + 0.75, wz);
+    townWood.push(bed);
+    for (const [wxo, wzo] of [[-0.85, -1.05], [0.85, -1.05], [-0.85, 1.05], [0.85, 1.05]]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.12, 10));
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(wx + wxo, gy + 0.45, wz + wzo);
+      townTrim.push(wheel);
+    }
+    const tongue = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.6));
+    tongue.position.set(wx, gy + 0.62, wz + 2.1);
+    townWood.push(tongue);
+  }
+  for (const [parts, mat] of [[townWood, woodMat], [townBarn, barnMat], [townTrim, trimMat]]) {
+    if (!parts.length) continue;
+    const mesh = new THREE.Mesh(mergeStaticMeshes(parts), mat);
+    mesh.castShadow = true;
+    group.add(mesh);
+  }
+
+  /* ---------- fence rails + ranch gates + sagebrush ---------- */
+  // the posts alone read as studs — two horizontal boards turn them into a
+  // real ranch fence, with natural gaps where the desert has won
+  const railParts = [];
+  for (let z = 8; z > -TRACK_LENGTH; z -= 12) {
+    for (const side of [-1, 1]) {
+      if (rng() > 0.86) continue;
+      for (const ry of [0.42, 0.86]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.11, 12.2));
+        rail.position.set(side * 7.6, ry, z - 6);
+        rail.rotation.y = (rng() - 0.5) * 0.02;
+        railParts.push(rail);
+      }
+    }
+  }
+  const fenceRails = new THREE.Mesh(mergeStaticMeshes(railParts), postMat);
+  fenceRails.castShadow = true;
+  group.add(fenceRails);
+  // ranch gates — frame + diagonal brace at four spots
+  const gateParts = [];
+  for (let i = 0; i < 4; i++) {
+    const side = i % 2 ? 1 : -1;
+    const gz = -40 - i * (TRACK_LENGTH / 4) - rng() * 30;
+    const gy = duneY(side * 7.6, gz);
+    const gw = 3.2;
+    for (const gx of [-gw / 2, gw / 2]) {
+      const jpost = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.5, 0.18));
+      jpost.position.set(side * 7.6, gy + 0.75, gz + gx);
+      gateParts.push(jpost);
+    }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, gw + 0.2));
+    top.position.set(side * 7.6, gy + 1.42, gz);
+    gateParts.push(top);
+    const brace = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, gw * 0.85));
+    brace.position.set(side * 7.6, gy + 0.72, gz);
+    brace.rotation.y = 0.5;
+    gateParts.push(brace);
+  }
+  const gates = new THREE.Mesh(mergeStaticMeshes(gateParts), trimMat);
+  gates.castShadow = true;
+  group.add(gates);
+  // sagebrush clumps — low dry scrub filling the mid-distance
+  const sageMat = new THREE.MeshStandardMaterial({ color: '#5d6b45', roughness: 1, flatShading: true });
+  const sageParts = [];
+  for (let i = 0; i < 36; i++) {
+    const side = rng() > 0.5 ? 1 : -1;
+    const sx = side * (9 + rng() * 28);
+    const sz = 12 - rng() * (TRACK_LENGTH + 30);
+    const s = 0.3 + rng() * 0.55;
+    const bush = new THREE.Mesh(jitterRock(new THREE.IcosahedronGeometry(s, 0), { amp: 0.35, seed: 820 + i, freq: 3.4 }), sageMat);
+    bush.position.set(sx, duneY(sx, sz) + s * 0.6, sz);
+    sageParts.push(bush);
+  }
+  const sage = new THREE.Mesh(mergeStaticMeshes(sageParts), sageMat);
+  sage.castShadow = true;
+  group.add(sage);
+
   // mesas on the horizon — r12: real butte profiles via a lofted ring stack
   // (steep skirt → bench → flat cap) with a per-angle plan wobble, replacing
   // the stacked-box look (props read flat, critic r11 LOW #10). All 10 merge
