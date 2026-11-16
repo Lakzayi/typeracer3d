@@ -405,6 +405,14 @@ function backToMenu() {
 
 window.addEventListener('keydown', (e) => {
   const inTyping = e.target && e.target.id === 'typeInput';
+  /* space resumes a paused race — after alt-tab people reach for the
+   * keyboard, not the mouse; harmless while typing because the engine is
+   * disabled and the input never sees it (window handler runs on bubble) */
+  if (race && race.paused && (e.key === ' ' || e.code === 'Space')) {
+    e.preventDefault();
+    setPaused(false);
+    return;
+  }
   if (e.key === 'Escape') {
     if (garageOpen) closeGarage(); // garage may sit on top of the room lobby
     else if (mpOpen) closeMpLobby();
