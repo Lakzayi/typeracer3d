@@ -5,6 +5,7 @@
 export class Sound {
   constructor() {
     this.enabled = true;
+    this.keySound = true; // mechanical typing clicks — independently toggleable
     this.ctx = null;
     this.engine = null; // { profile, update(s01), stop() } while a race runs
     this._noiseBuf = null;
@@ -227,7 +228,7 @@ export class Sound {
     osc.start(); osc.stop(ctx.currentTime + dur + 0.02);
   }
 
-  key() { this._blip(620 + Math.random() * 160, 0.035, 'square', 0.016); }
+  key() { if (this.keySound) this._blip(620 + Math.random() * 160, 0.035, 'square', 0.016); }
   error() { this._blip(130, 0.16, 'sawtooth', 0.05, 70); }
   tick() { this._blip(440, 0.09, 'square', 0.04); }
   go() { this._blip(660, 0.25, 'square', 0.05, 880); }

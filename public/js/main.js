@@ -42,7 +42,7 @@ let lastPracticeId = null;
 
 const SETTINGS_KEY = 'tr3d_settings_v1';
 const settings = Object.assign(
-  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, ghostOn: false, language: 'en' },
+  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, keySound: true, ghostOn: false, language: 'en' },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
 );
 
@@ -82,6 +82,17 @@ function applySettingsToUI() {
   applyLanguageDir();
   hud.els.soundBtn.textContent = settings.soundOn ? '🔊' : '🔇';
   sound.enabled = settings.soundOn;
+  syncKeySoundUI();
+}
+
+/* ⌨️ mechanical typing clicks — independent of the master mute */
+function syncKeySoundUI() {
+  const on = settings.keySound ?? true;
+  sound.keySound = on;
+  $('keySound').value = on ? 'on' : 'off';
+  hud.els.keySoundBtn.textContent = on ? '⌨️' : '⌨';
+  hud.els.keySoundBtn.classList.toggle('muted', !on);
+  hud.els.keySoundBtn.title = on ? 'typing key sounds: ON' : 'typing key sounds: OFF';
 }
 
 $('typingMode').addEventListener('change', (e) => {
@@ -115,6 +126,18 @@ hud.els.soundBtn.addEventListener('click', () => {
   settings.soundOn = sound.toggle();
   hud.els.soundBtn.textContent = settings.soundOn ? '🔊' : '🔇';
   saveSettings();
+});
+
+$('keySound').addEventListener('change', (e) => {
+  settings.keySound = e.target.value === 'on';
+  syncKeySoundUI();
+  saveSettings();
+});
+hud.els.keySoundBtn.addEventListener('click', () => {
+  settings.keySound = !(settings.keySound ?? true);
+  syncKeySoundUI();
+  saveSettings();
+  hud.toast(settings.keySound ? '⌨️ key sounds on' : '🔇 key sounds off', 1300);
 });
 
 /* ---------------- menu ---------------- */

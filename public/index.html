@@ -95,6 +95,7 @@
 
     <button id="soundBtn" title="toggle sound">🔊</button>
     <button id="viewBtn" title="toggle first-person view">🎥</button>
+    <button id="keySoundBtn" title="typing key sounds">⌨️</button>
     <div id="escHint">ESC · leave race &nbsp;·&nbsp; N · day/night</div>
 
     <div id="errorFlash"></div>
@@ -236,6 +237,14 @@
             <select id="typingMode">
               <option value="realistic" selected>⌨️ Realistic · fix mistakes with backspace</option>
               <option value="arcade">🕹️ Arcade · wrong keys don't stick</option>
+            </select>
+          </div>
+
+          <div class="setupRow">
+            <label>Typing key sounds <span class="opt">mechanical clicks</span></label>
+            <select id="keySound">
+              <option value="on" selected>🔊 On</option>
+              <option value="off">🔇 Off</option>
             </select>
           </div>
 

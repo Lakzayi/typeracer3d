@@ -25,6 +25,7 @@ export class HUD {
       hpHearts: $('hpHearts'), mistakePanel: $('mistakePanel'), mistakeBars: $('mistakeBars'),
       speedBlur: $('speedBlur'),
       spectateBar: $('spectateBar'), spRacers: $('spRacers'), spCam: $('spCam'),
+      keySoundBtn: $('keySoundBtn'),
       pauseOverlay: $('pauseOverlay'), soundBtn: $('soundBtn'),
       themeCards: $('themeCards'), statsLine: $('statsLine'), menuBadge: $('menuBadge'),
       resPlace: $('resPlace'), resStats: $('resStats'), resBoard: $('resBoard'),
