@@ -248,6 +248,10 @@ export class HUD {
   onResults(results) {
     const { rows } = results;
     const me = rows.find((r) => r.isPlayer);
+    // multiplayer results exit into the room lobby — relabel the buttons so
+    // 'race again' (a solo flow that would strand the room) is not offered
+    $('menuBtn').textContent = results.mode === 'mp' ? '↩ lobby' : 'menu';
+    $('againBtn').classList.toggle('hidden', results.mode === 'mp');
     let head;
     if (results.died) {
       head = `💀 died at ${Math.round(results.died.progress01 * 100)}%<small>death mode — one mistake ends the run</small>`;

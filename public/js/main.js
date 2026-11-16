@@ -380,13 +380,23 @@ $('loadStats').addEventListener('click', async () => {
 });
 
 $('startBtn').addEventListener('click', () => startRaceFlow());
-$('againBtn').addEventListener('click', () => { hud.els.results.classList.add('hidden'); startRaceFlow(); });
+$('againBtn').addEventListener('click', () => {
+  hud.els.results.classList.add('hidden');
+  if (mpConnected()) { backToMenu(); return; } // mp 'again' = the room lobby, never a stray solo race
+  startRaceFlow();
+});
 $('menuBtn').addEventListener('click', () => backToMenu());
 
 function backToMenu() {
   if (swUpdatePending) { location.reload(); return; } // mid-race update: apply now that we're idle
+  // leaving a CONNECTED mp race keeps the room alive: the results' exit
+  // returns to the lobby so the host can start the next race (teardown used
+  // to fire here and killed the room for everyone the instant a finisher
+  // — host above all — hit menu while others were still mid-race)
+  const backToLobby = !!(race && race.mode === 'mp') && mpConnected();
   if (race) { race.dispose(); race = null; }
-  if (mpConnected()) { setRacing(false); mpTeardown(); } // leaving an mp race closes the room for us
+  if (backToLobby) setRacing(false);
+  else if (mpConnected()) { setRacing(false); mpTeardown(); }
   if (sound) sound.stopEngine();
   if (typing) { typing.disable(); }
   phase = 'menu';
@@ -401,6 +411,22 @@ function backToMenu() {
   hud.showMirror(false);
   hud.updateCombo(0);
   hud.setSpeedGlow(0);
+  if (backToLobby) reopenRoomLobby();
+}
+
+/* an mp race ended — return to the SAME room lobby. The room only closes
+ * when someone leaves the lobby explicitly (host leaving = room closed). */
+function reopenRoomLobby() {
+  if (!mpConnected()) return;
+  mpOpen = true;
+  hud.els.menu.classList.add('hidden');
+  $('mpView').classList.remove('hidden');
+  rebuildRoomLineup(); // lobby backdrop = the live room lineup
+  showMpWait();
+  if (!mpHost()) mpAcked = true; // already in the roster — skip the 12s 'never confirmed' warning
+  setMpStatus(mpHost()
+    ? '🏁 race over — start the next one when everyone is back'
+    : '🏁 race over — waiting for the host to start the next one');
 }
 
 window.addEventListener('keydown', (e) => {
