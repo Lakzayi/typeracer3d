@@ -29,7 +29,7 @@ function liveLogWpm(log, raceTime, windowS = 8) {
 }
 
 export class RaceController {
-  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic', mpDeath = false, hpMax = 0 }) {
+  constructor({ race, difficulty, myWpm, myName, world, sound, hud, typing, mode = 'classic', mpDeath = false, hpMax = 0, wordsMode = false }) {
     this.race = race;
     this.world = world;
     this.sound = sound;
@@ -42,6 +42,7 @@ export class RaceController {
     this.hpLeft = this.hpMax;
     this.mistakes = new Map(); // "expected|typed" -> count (worst-keys panel)
     this.resetCount = 0;
+    this.wordsMode = wordsMode && mode === 'mp'; // 🔤 word race: death resets reshuffle the words
     this.solo = SOLO_MODES.includes(mode); // no opponents on track
     this.died = false;
     this.textLen = race.text.length;
@@ -158,7 +159,21 @@ export class RaceController {
    * The vehicle whooshes back to z=0 through the smooth visual lerp. */
   _deathReset() {
     this.resetCount++;
-    this.typing.resetToStart();
+    if (this.wordsMode) {
+      /* 🔤 word race — the restart is never memorizable: same words, fresh
+       * order. setText rebuilds the panel; lifetime errors must survive it. */
+      const words = this.race.text.split(' ');
+      for (let i = words.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [words[i], words[j]] = [words[j], words[i]];
+      }
+      this.race.text = words.join(' ');
+      const lifetimeErrors = this.typing.errors;
+      this.typing.setText(this.race.text);
+      this.typing.errors = lifetimeErrors;
+    } else {
+      this.typing.resetToStart();
+    }
     this.state[0].errorT = 0.5;
     this.world.shake(2.6);
     this.world.impact(0, 2.2);

@@ -386,9 +386,22 @@
             </select>
           </div>
           <div class="gcRow">
+            <label>text language</label>
+            <select id="mpLang">
+              <option value="en" selected>🇬🇧 English</option>
+              <option value="fa">🇮🇷 فارسی</option>
+              <option value="es">🇪🇸 Español</option>
+              <option value="fr">🇫🇷 Français</option>
+              <option value="de">🇩🇪 Deutsch</option>
+              <option value="tr">🇹🇷 Türkçe</option>
+              <option value="ru">🇷🇺 Русский</option>
+            </select>
+          </div>
+          <div class="gcRow">
             <label>race</label>
             <select id="mpRaceType">
               <option value="real">🎲 random real TypeRacer race</option>
+              <option value="words">🔤 word race — independent words</option>
               <option value="custom">✍️ custom text</option>
             </select>
           </div>
@@ -400,6 +413,7 @@
             <option value="3">❤️ 3 hearts</option>
           </select> — run out of hearts and you go back to the start line</label>
           <textarea id="mpCustomText" class="mpInput hidden" rows="3" placeholder="paste the text everyone will type…"></textarea>
+          <input id="mpWordCount" class="mpInput hidden" type="number" min="5" max="300" value="25" title="how many independent words — everyone types the same words, death resets shuffle the order">
           <button id="mpStartBtn">🏁 start the race</button>
         </div>
         <div id="mpGuestHint" class="garageHint">connected — waiting for the host to start…</div>

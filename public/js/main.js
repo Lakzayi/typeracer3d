@@ -10,7 +10,7 @@ import { RaceController } from './race.js';
 import { HUD } from './hud.js';
 import { Sound } from './sound.js';
 import { MODES, SOLO_MODES, REAL_DATA_MODES, SHAREABLE_RACE_MODES } from './modes.js';
-import { drillRace } from './drills.js';
+import { drillRace, COMMON_WORDS } from './drills.js';
 import { recordRace, renderStatsPanel, resetStats, localStatsSummary } from './stats.js';
 import { demoRace } from './demo-data.js';
 import { getGhost, maybeSaveGhost, ghostLogFor } from './ghost.js';
@@ -725,7 +725,7 @@ async function launchRace(raceData, { mode, difficulty, myName = null, myWpm = n
 
   // --- controller ---
   if (race) race.dispose();
-  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode, mpDeath, hpMax });
+  race = new RaceController({ race: raceData, difficulty, myWpm, myName, world, sound, hud, typing, mode, mpDeath, hpMax, wordsMode: raceData.wordsMode });
 
   // --- hud ---
   const colors = racers.map((r, i) => theme.vehicles[i]?.color ?? '#2e86ff');
@@ -1047,6 +1047,7 @@ function showMpWait() {
     // is already showing it, so guests joining see exactly this
     $('mpEnvTheme').value = currentThemeId;
     $('mpEnvTod').value = settings.timeOfDay;
+    $('mpLang').value = settings.language;
     $('mpHpMode').value = mpHpHearts ? String(mpHpHearts) : (mpDeathOn ? 'death' : 'off');
   } else {
     updateMpEnvLine();
@@ -1102,6 +1103,32 @@ async function joinWithCode() {
   }
 }
 
+/* 🔤 word race pool — the language's own words (fa pool texts), English
+ * common words otherwise; independent words joined by spaces, 10ff style */
+function mpWordPool(langId) {
+  if (langId !== 'en') {
+    const lang = getLanguage(langId);
+    if (lang.pool.length) {
+      const bag = new Set();
+      for (const p of lang.pool) {
+        for (const w of p.text.split(/\s+/)) {
+          const clean = w.replace(/[.,;:!?«»"'()\-]/g, '');
+          if (clean.length >= 1) bag.add(clean);
+        }
+      }
+      if (bag.size >= 12) return [...bag];
+    }
+  }
+  return COMMON_WORDS;
+}
+
+function generateWordText(langId, count) {
+  const pool = mpWordPool(langId);
+  const out = [];
+  for (let i = 0; i < count; i++) out.push(pool[Math.floor(Math.random() * pool.length)]);
+  return out.join(' ');
+}
+
 /* host pressed START — fetch (or take) the text, tell everyone, race */
 async function mpHostStart() {
   if (!mpHost() || mpBusy) return;
@@ -1109,12 +1136,19 @@ async function mpHostStart() {
   $('mpStartBtn').disabled = true;
   try {
     const type = $('mpRaceType').value;
-    let text, source, raceId;
+    let text, source, raceId, words = false;
     if (type === 'custom') {
       text = $('mpCustomText').value.trim();
       if (!text) { setMpStatus('paste a text first', true); return; }
       source = 'custom text';
       raceId = 'mp-' + Date.now().toString(36);
+    } else if (type === 'words') {
+      const count = Math.max(5, Math.min(300, Number($('mpWordCount').value) || 25));
+      const lang = getLanguage(settings.language);
+      text = generateWordText(settings.language, count);
+      source = `${count} random words · ${lang.flag} ${lang.name}`;
+      raceId = 'mp-words-' + Date.now().toString(36);
+      words = true;
     } else {
       setMpStatus('fetching a real race…');
       const rd = applyLanguageToRace(await API.race());
@@ -1122,8 +1156,8 @@ async function mpHostStart() {
     }
     setMpStatus('');
     // the host's environment travels with the start (late joiners included)
-    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay, death: mpDeathOn, hp: mpHpHearts });
-    await mpLaunch({ text, source, raceId });
+    mpNetStart(text, source, raceId, { theme: currentThemeId, tod: settings.timeOfDay, death: mpDeathOn, hp: mpHpHearts, words });
+    await mpLaunch({ text, source, raceId, words });
   } catch (e) {
     setMpStatus('could not start: ' + e.message, true);
   } finally {
@@ -1133,13 +1167,13 @@ async function mpHostStart() {
 }
 
 /* both sides land here: hide the lobby and put everyone on the grid */
-async function mpLaunch({ text, source, raceId }) {
+async function mpLaunch({ text, source, raceId, words }) {
   if (phase !== 'menu') return;
   mpOpen = false;
   $('mpView').classList.add('hidden');
   setRacing(true);
   await launchRace({
-    id: raceId, text, source, mp: true,
+    id: raceId, text, source, mp: true, wordsMode: !!words,
     racers: mpPlayers().filter((p) => p.id !== mpSelfId())
       .map((p) => ({
         name: p.name, isRemote: true, remoteId: p.id,
@@ -1217,7 +1251,16 @@ $('mpCreateBtn').addEventListener('click', async () => {
 $('mpJoinBtn').addEventListener('click', joinWithCode);
 $('mpCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') joinWithCode(); });
 $('mpRaceType').addEventListener('change', () => {
-  $('mpCustomText').classList.toggle('hidden', $('mpRaceType').value !== 'custom');
+  const type = $('mpRaceType').value;
+  $('mpCustomText').classList.toggle('hidden', type !== 'custom');
+  $('mpWordCount').classList.toggle('hidden', type !== 'words');
+});
+$('mpLang').addEventListener('change', (e) => {
+  settings.language = e.target.value;
+  saveSettings();
+  applyLanguageDir();
+  const lang = getLanguage(settings.language);
+  hud.toast(`${lang.flag} texts: ${lang.name}`, 1600);
 });
 $('mpStartBtn').addEventListener('click', mpHostStart);
 

@@ -1050,3 +1050,10 @@ details.help[open] summary::after { transform: rotate(90deg); }
   background: linear-gradient(120deg, rgba(87, 217, 163, 0.25), rgba(46, 200, 255, 0.25));
   border: 1px solid rgba(87, 217, 163, 0.5); color: #c9f5e4;
 }
+
+/* word-count input in the room — same look as the custom-text textarea */
+#mpWordCount {
+  width: 100%; padding: 10px 12px; border-radius: 10px;
+  font-family: var(--font); font-size: 13px; font-weight: 650; color: var(--text);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+}

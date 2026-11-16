@@ -301,7 +301,7 @@ export async function joinRoom(roomCode, name, garage = null) {
     } else if (msg?.t === 'env') {
       emit('env', { theme: msg.theme, tod: msg.tod, death: !!msg.death, hp: Math.max(0, Math.min(3, (msg.hp ?? 0) | 0)) });
     } else if (msg?.t === 'start') {
-      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId, theme: msg.theme, tod: msg.tod, death: !!msg.death, hp: Math.max(0, Math.min(3, (msg.hp ?? 0) | 0)) });
+      emit('start', { text: msg.text, source: msg.source, raceId: msg.raceId, theme: msg.theme, tod: msg.tod, death: !!msg.death, hp: Math.max(0, Math.min(3, (msg.hp ?? 0) | 0)), words: !!msg.words });
     } else if (msg?.t === 'snap') {
       emit('snap', msg.rows ?? []);
     } else if (msg?.t === 'left') {
@@ -339,7 +339,7 @@ export function startRace(text, source, raceId, env = null) {
   if (!isHost) return;
   ghostSnapDone = false;
   if (env?.theme) envState = { theme: env.theme, tod: env.tod ?? null, death: !!env.death, hp: Math.max(0, Math.min(3, (env.hp ?? 0) | 0)) };
-  hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod, death: envState.death, hp: envState.hp });
+  hostBroadcast({ t: 'start', text, source, raceId, theme: envState.theme, tod: envState.tod, death: envState.death, hp: envState.hp, words: !!env?.words });
 }
 
 /* host picks a new environment mid-lobby — broadcast for the live preview */
