@@ -321,6 +321,40 @@ function buildCar(p0, { player = false } = {}) {
     const muscleParts = new THREE.Mesh(mergeStaticMeshes([scoop, ...stripes, wing, finL, finR]), acc);
     muscleParts.castShadow = true;
     g.add(muscleParts);
+    // attitude extras: chrome side-exhaust stacks, chin splitter, blacked
+    // hood insert + rear diffuser fins — full street-machine silhouette
+    const muscleDark = [];
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(1.72, 0.05, 0.32), dark);
+    splitter.position.set(0, 0.30, -2.08);
+    muscleDark.push(splitter);
+    const hoodBlack = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.03, 0.85), dark);
+    hoodBlack.position.set(0, 0.925, -1.30);
+    muscleDark.push(hoodBlack);
+    for (const fx of [-0.48, -0.16, 0.16, 0.48]) {
+      const diffFin = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.15, 0.34), dark);
+      diffFin.position.set(fx, 0.32, 2.02);
+      muscleDark.push(diffFin);
+    }
+    const muscleDarkMesh = new THREE.Mesh(mergeStaticMeshes(muscleDark), dark);
+    muscleDarkMesh.castShadow = true;
+    g.add(muscleDarkMesh);
+    const chrome = new THREE.MeshStandardMaterial({ color: '#c8cfd8', roughness: 0.25, metalness: 0.9, envMapIntensity: 1.3 });
+    const pipeParts = [];
+    for (const sx of [-1.0, 1.0]) {
+      for (const pz of [-0.42, 0.05]) {
+        const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.85, 8), chrome);
+        pipe.rotation.x = Math.PI / 2;
+        pipe.position.set(sx, 0.36, pz);
+        pipeParts.push(pipe);
+        const pipeTip = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.1, 8), dark);
+        pipeTip.rotation.x = Math.PI / 2;
+        pipeTip.position.set(sx, 0.36, pz - 0.45);
+        pipeParts.push(pipeTip);
+      }
+    }
+    const pipes = new THREE.Mesh(mergeStaticMeshes(pipeParts), chrome);
+    pipes.castShadow = true;
+    g.add(pipes);
   } else if (variant === 2) { // rally: roof rails + forward light bar
     const rackParts = [];
     for (const rx of [-0.48, 0.48]) {
@@ -337,6 +371,33 @@ function buildCar(p0, { player = false } = {}) {
     const rack = new THREE.Mesh(mergeStaticMeshes(rackParts), acc);
     rack.castShadow = true;
     g.add(rack);
+    // attitude extras: big angled rear wing on tall stanchions + mud flaps
+    const bigWing = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.07, 0.5), acc);
+    bigWing.position.set(0, roofY + 0.44, 1.88);
+    bigWing.rotation.x = 0.22; // blade angled into the airflow
+    bigWing.castShadow = true;
+    g.add(bigWing);
+    const rallyDark = [];
+    for (const wx of [-0.6, 0.6]) {
+      const stn = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.44, 0.16), dark);
+      stn.position.set(wx, roofY + 0.22, 1.94);
+      rallyDark.push(stn);
+    }
+    const wingEndL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.16, 0.5), dark);
+    wingEndL.position.set(-0.94, roofY + 0.44, 1.88);
+    const wingEndR = wingEndL.clone(); wingEndR.position.x = 0.94;
+    rallyDark.push(wingEndL, wingEndR);
+    for (const fz of [-1.02, 1.12]) {
+      for (const fx2 of [-0.92, 0.92]) {
+        const flap = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.03), dark);
+        flap.rotation.x = 0.35;
+        flap.position.set(fx2, 0.34, fz);
+        rallyDark.push(flap);
+      }
+    }
+    const rallyDarkMesh = new THREE.Mesh(mergeStaticMeshes(rallyDark), dark);
+    rallyDarkMesh.castShadow = true;
+    g.add(rallyDarkMesh);
   }
 
   if (player && variant !== 1) { // muscle already wears its wing

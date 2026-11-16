@@ -224,9 +224,13 @@ function buildHorse(paint, { player = false } = {}) {
     stirrupParts.push(strap, stirrup);
   }
   // reins: bit → rider hands (rider sits at (0, 1.86, 0.16), hands forward)
+  // reins: bit -> rider hands. The racer jockey rides in a crouch (the
+  // variant block rotates the rider), so his hands sit lower + further forward
+  const handY = variant === 1 ? 1.94 : 2.28;
+  const handZ = variant === 1 ? -0.30 : -0.02;
   stirrupParts.push(
-    cylBetween([0, 2.78, -1.52], [-0.09, 2.28, -0.02], 0.012),
-    cylBetween([0, 2.78, -1.52], [0.09, 2.28, -0.02], 0.012),
+    cylBetween([0, 2.78, -1.52], [-0.09, handY, handZ], 0.012),
+    cylBetween([0, 2.78, -1.52], [0.09, handY, handZ], 0.012),
   );
   const leatherMesh = new THREE.Mesh(mergeStaticMeshes(stirrupParts), leather);
   leatherMesh.castShadow = true;
@@ -275,17 +279,65 @@ function buildHorse(paint, { player = false } = {}) {
   dust.position.set(0, 0.5, 1.9);
   add(dust);
 
-  /* ---- breed variant: rescale the whole model (label on g stays 1:1).
-   * racer — tall, lean, leggy · draft — heavy body + feathered lower legs */
+  /* ---- breed variant — the three breeds READ as different animals:
+   * v0 stock horse (baseline) · v1 racer: lean leggy build + jockey in a
+   * crouched race-ride with helmet · v2 draft: massive frame, feathered
+   * legs, anchor hooves, padded work collar */
   if (variant === 1) {
     model.scale.set(0.90, 1.06, 1.04);
+    // race crouch — jockey folded flat over the withers
+    rider.rotation.x = -0.62;
+    rider.position.set(0, 1.76, 0.10);
+    rider.children[2].visible = false; // cowboy hat + straight arms/legs out
+    const jockeyLimbs = [];
+    for (const jx of [-0.17, 0.17]) {
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.32, 0.07), maneMat);
+      arm.position.set(jx, 0.36, -0.14);
+      arm.rotation.x = -1.2; // tucked low, reaching for the reins
+      jockeyLimbs.push(arm);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.4, 0.14), maneMat);
+      leg.position.set(jx - 0.04, 0.02, 0.12);
+      leg.rotation.x = 0.55; // knees up in the short stirrup
+      jockeyLimbs.push(leg);
+    }
+    const jockeyMesh = new THREE.Mesh(mergeStaticMeshes(jockeyLimbs), maneMat);
+    jockeyMesh.castShadow = true;
+    rider.add(jockeyMesh);
+    // jockey helmet dome + peak in silks colors instead of the cowboy hat
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), shirtMat);
+    dome.position.y = 0.70;
+    const helmet = new THREE.Mesh(mergeStaticMeshes([dome]), shirtMat);
+    helmet.castShadow = true;
+    rider.add(helmet);
+    const peak = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.15), shirtMat);
+    peak.position.set(0, 0.70, -0.17);
+    rider.add(peak);
   } else if (variant === 2) {
-    model.scale.set(1.12, 0.98, 1.06);
-    for (const leg of legs) { // feather tufts above the hooves
-      const tuft = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.2, 0.13), maneMat);
-      tuft.position.set(0, -0.72, 0.02);
+    model.scale.set(1.14, 0.98, 1.06);
+    for (const leg of legs) { // heavy feather tufts above the hooves
+      const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.36, 7), maneMat);
+      tuft.position.set(0, -0.66, 0.02);
       leg.add(tuft);
     }
+    for (const lower of lowers) lower.scale.set(1.35, 1, 1.35); // anchor hooves
+    // work collar — the big padded hoop draft horses push into
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.065, 8, 18), leather);
+    collar.position.set(0, 1.66, -0.58);
+    collar.rotation.x = 1.1; // hoop wraps the neck slope
+    const collarMesh = new THREE.Mesh(mergeStaticMeshes([collar]), leather);
+    collarMesh.castShadow = true;
+    add(collarMesh);
+    // hames: the two wooden bars up the collar sides
+    const hameParts = [];
+    for (const hx of [-0.27, 0.27]) {
+      const hame = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.42, 0.08), leather);
+      hame.position.set(hx, 1.78, -0.62);
+      hame.rotation.x = 0.35;
+      hameParts.push(hame);
+    }
+    const hames = new THREE.Mesh(mergeStaticMeshes(hameParts), leather);
+    hames.castShadow = true;
+    add(hames);
   }
 
   return { group: g, legs, lowers, tail, dust, dustMat, lanternLight, cage, riderMats: [shirtMat, skin] };

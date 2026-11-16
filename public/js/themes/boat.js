@@ -332,7 +332,7 @@ function buildBoat(paint, { player = false } = {}) {
 
   /* ---- hull variant ---- */
   if (variant === 1) { // hydro — widened race hull with bow sponsons
-    model.scale.x = 1.12;
+    model.scale.x = 1.2;
     const podParts = [];
     for (const sx of [-0.72, 0.72]) {
       const pod = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.20, 1.3), stripeMat ?? hullMat);
@@ -345,6 +345,28 @@ function buildBoat(paint, { player = false } = {}) {
     const pods = new THREE.Mesh(mergeStaticMeshes(podParts), stripeMat ?? hullMat);
     pods.castShadow = true;
     add(pods);
+    // attitude extras: low cowl bubble ahead of the driver, tall stabilizer
+    // fin, twin raked exhaust stacks — reads as a full-out race hydroplane
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 9), darkMat);
+    canopy.scale.set(0.72, 0.55, 1.2);
+    canopy.position.set(0, 0.98, -0.62);
+    canopy.castShadow = true;
+    add(canopy);
+    const stabFin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.62, 0.55), stripeMat ?? hullMat);
+    stabFin.position.set(0, 1.42, 1.62);
+    stabFin.rotation.x = -0.18;
+    stabFin.castShadow = true;
+    add(stabFin);
+    const stackParts = [];
+    for (const hx of [-0.2, 0.2]) {
+      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.065, 0.42, 8), darkMat);
+      stack.position.set(hx, 0.98, 0.72);
+      stack.rotation.x = -0.5; // stacks rake aft
+      stackParts.push(stack);
+    }
+    const stacks = new THREE.Mesh(mergeStaticMeshes(stackParts), darkMat);
+    stacks.castShadow = true;
+    add(stacks);
   } else if (variant === 2) { // cruiser — pillhouse cabin amidships
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.5, 1.15), stripeMat ?? deckMat);
     cabin.position.set(0, 1.02, 0.3);
@@ -356,6 +378,43 @@ function buildBoat(paint, { player = false } = {}) {
     add(cabin);
     add(cabinGlass);
     add(roof);
+    // attitude extras: bow railing, radar arch with dome, aft swim platform
+    const railParts = [];
+    for (const rz of [-1.85, -1.45, -1.05, -0.65]) {
+      for (const rx of [-0.44, 0.44]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 6), darkMat);
+        post.position.set(rx, 1.0, rz);
+        railParts.push(post);
+      }
+    }
+    for (const rx of [-0.44, 0.44]) {
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1.35, 6), darkMat);
+      rail.rotation.x = Math.PI / 2;
+      rail.position.set(rx, 1.14, -1.25);
+      railParts.push(rail);
+    }
+    const rails = new THREE.Mesh(mergeStaticMeshes(railParts), darkMat);
+    rails.castShadow = true;
+    add(rails);
+    const archParts = [];
+    for (const ax of [-0.3, 0.3]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 0.4, 6), darkMat);
+      leg.position.set(ax, 1.48, 0.95);
+      archParts.push(leg);
+    }
+    const archBar = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.045, 0.06), darkMat);
+    archBar.position.set(0, 1.66, 0.95);
+    archParts.push(archBar);
+    const arch = new THREE.Mesh(mergeStaticMeshes(archParts), darkMat);
+    arch.castShadow = true;
+    add(arch);
+    const radarDome = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), deckMat);
+    radarDome.position.set(0, 1.72, 0.95);
+    add(radarDome);
+    const platform = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.06, 0.5), deckMat);
+    platform.position.set(0, 0.74, 2.32);
+    platform.castShadow = true;
+    add(platform);
   }
 
   return { group: g, wake, wakeMat, foamMat, spray, sprayMat, navL, navR, navMats: [navL.material, navR.material], light };

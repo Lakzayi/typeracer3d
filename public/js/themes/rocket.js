@@ -348,28 +348,76 @@ function buildRocket(paint, { player = false } = {}) {
   bandD.position.set(0, 1.3, 1.06);
   add(bandD);
 
-  /* ---- variant: rescale the model (label on g stays 1:1) ---- */
-  if (variant === 1) { // stubby — fat, short, twin side boosters
-    model.scale.set(1.14, 1.1, 0.85);
+  /* ---- variant — three silhouettes that read at a glance:
+   * v0 classic rocket · v1 heavy lifter: fat body, big twin strap-on
+   * boosters with nozzles + cruciform tail fins · v2 space fighter:
+   * slender delta-wing interceptor with canopy and twin engines */
+  if (variant === 1) { // heavy lifter — fat, short, twin side boosters
+    model.scale.set(1.2, 1.1, 0.85);
     const boosterParts = [];
     for (const bx of [-0.62, 0.62]) {
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 1.9, 10), accent2);
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 1.9, 10), accent2);
       b.rotation.x = Math.PI / 2;
       b.position.set(bx, 1.06, 0.8);
-      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.17, 0.3, 10), accent);
+      const tip = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.32, 10), accent);
       tip.rotation.x = -Math.PI / 2;
       tip.position.set(bx, 1.06, -0.35);
-      boosterParts.push(b, tip);
+      const noz = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.28, 10), accent2);
+      noz.rotation.x = Math.PI / 2; // bell opens aft
+      noz.position.set(bx, 1.06, 1.82);
+      boosterParts.push(b, tip, noz);
     }
     const boosters = new THREE.Mesh(mergeStaticMeshes(boosterParts), accent);
     boosters.castShadow = true;
     add(boosters);
-  } else if (variant === 2) { // needle — slender high-speed interceptor
+    // cruciform tail fins — cargo-lifter attitude
+    const lifterFins = [];
+    for (const fa of [Math.PI / 2, Math.PI * 7 / 6, Math.PI * 11 / 6]) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.52, 0.62), accent);
+      fin.position.set(Math.cos(fa) * 0.5, 1.3 + Math.sin(fa) * 0.5, 1.5);
+      fin.rotation.z = fa;
+      lifterFins.push(fin);
+    }
+    const lifterFinMesh = new THREE.Mesh(mergeStaticMeshes(lifterFins), accent);
+    lifterFinMesh.castShadow = true;
+    add(lifterFinMesh);
+  } else if (variant === 2) { // space fighter — slender delta interceptor
     model.scale.set(0.88, 0.92, 1.16);
     const spike = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.7, 10), accent);
     spike.rotation.x = -Math.PI / 2;
     spike.position.set(0, 1.3, -2.62);
     add(spike);
+    // swept delta wings + winglets — the fighter silhouette
+    const wingParts = [];
+    for (const wx of [-1, 1]) {
+      const wing = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.05, 0.8), accent);
+      wing.rotation.y = -wx * 0.5; // swept aft
+      wing.rotation.z = wx * -0.09; // slight droop
+      wing.position.set(wx * 0.68, 1.24, 1.1);
+      wingParts.push(wing);
+      const winglet = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.3, 0.34), accent2);
+      winglet.position.set(wx * 1.28, 1.3, 1.42);
+      winglet.rotation.y = -wx * 0.5;
+      wingParts.push(winglet);
+    }
+    const wings = new THREE.Mesh(mergeStaticMeshes(wingParts), accent);
+    wings.castShadow = true;
+    add(wings);
+    // cockpit bubble + twin engine bells
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 9), glass);
+    canopy.scale.set(0.8, 0.75, 1.55);
+    canopy.position.set(0, 1.62, -1.0);
+    add(canopy);
+    const nozParts = [];
+    for (const nx of [-0.17, 0.17]) {
+      const noz = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.32, 10), accent2);
+      noz.rotation.x = Math.PI / 2;
+      noz.position.set(nx, 1.3, 2.28);
+      nozParts.push(noz);
+    }
+    const nozzles = new THREE.Mesh(mergeStaticMeshes(nozParts), accent2);
+    nozzles.castShadow = true;
+    add(nozzles);
   }
 
   return { group: g, jet, jetMat, jetCore, jetCoreMat, jetGlowMat, smearMat, trail, light, shellMat: shell, accentMat: accent };

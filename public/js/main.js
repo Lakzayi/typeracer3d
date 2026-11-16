@@ -172,23 +172,23 @@ const GHOST_PAINT = { primary: '#dfe7f2', secondary: '#8fb0ff', variant: 0 }; //
 const VARIANT_INFO = {
   car: [
     { name: 'GT', desc: 'balanced coupe' },
-    { name: 'Muscle', desc: 'wide, scooped, big wing' },
-    { name: 'Rally', desc: 'lifted, roof light bar' },
+    { name: 'Muscle', desc: 'side pipes, splitter, diffuser' },
+    { name: 'Rally', desc: 'light bar, big wing, mud flaps' },
   ],
   horse: [
     { name: 'Warmblood', desc: 'balanced trail horse' },
-    { name: 'Racer', desc: 'tall, lean, leggy' },
-    { name: 'Draft', desc: 'heavy, feathered legs' },
+    { name: 'Racer', desc: 'jockey in a race crouch' },
+    { name: 'Draft', desc: 'work collar, anchor hooves' },
   ],
   boat: [
     { name: 'Runabout', desc: 'classic speedboat' },
-    { name: 'Hydro', desc: 'wide sponson racer' },
-    { name: 'Cruiser', desc: 'cabin cruiser' },
+    { name: 'Hydro', desc: 'canopy, fin, raked stacks' },
+    { name: 'Cruiser', desc: 'railing, radar arch, platform' },
   ],
   rocket: [
     { name: 'Classic', desc: 'balanced booster' },
-    { name: 'Stubby', desc: 'fat twin-booster hauler' },
-    { name: 'Needle', desc: 'slender interceptor' },
+    { name: 'Lifter', desc: 'twin boosters + tail fins' },
+    { name: 'Fighter', desc: 'delta wings, twin engines' },
   ],
 };
 
