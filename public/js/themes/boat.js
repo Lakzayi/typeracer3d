@@ -544,7 +544,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // undulating sand genuinely wraps their bases
   const cliffMat = new THREE.MeshStandardMaterial({ color: '#77624e', roughness: 1, flatShading: true });
   const cliffMeshes = [];
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 150; i++) {
     const side = i % 2 ? 1 : -1;
     const x = side * (13 + rng() * 22);
     const z = 16 - rng() * (TRACK_LENGTH + 40);
@@ -596,6 +596,58 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   }
   const reeds = new THREE.Mesh(mergeStaticMeshes(reedMeshes), reedMat);
   group.add(reeds);
+
+  /* ---------- r16 bank life: reed clusters + cattails, sediment ledges,
+   * morning mist ---------- */
+  // srng keeps the shared seed stream untouched (every existing layout stays)
+  const srng = mulberry32(31337);
+  // second reed colony — denser, slightly different tone + cattail heads
+  const reedMat2 = new THREE.MeshStandardMaterial({ color: '#5c8a3c', roughness: 1 });
+  const cattailMat = new THREE.MeshStandardMaterial({ color: '#6e4a26', roughness: 1 });
+  const reedMeshes2 = [], cattailParts = [];
+  for (let i = 0; i < 90; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const x = side * (7.4 + srng() * 5), z = 16 - srng() * (TRACK_LENGTH + 20);
+    const reed = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 1.1 + srng() * 1.3, 4), reedMat2);
+    reed.position.set(x, 0.85, z);
+    reed.rotation.z = (srng() - 0.5) * 0.3;
+    reedMeshes2.push(reed);
+    if (srng() > 0.55) {
+      const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 5), cattailMat);
+      tip.position.set(x + reed.rotation.z * -0.6, 1.62 + srng() * 0.3, z);
+      cattailParts.push(tip);
+    }
+  }
+  const reeds2 = new THREE.Mesh(mergeStaticMeshes(reedMeshes2), reedMat2);
+  const cattails = new THREE.Mesh(mergeStaticMeshes(cattailParts), cattailMat);
+  group.add(reeds2, cattails);
+  // sediment ledges — thin darker shelf bands inset in the cut banks; they
+  // turn the boulder rows into readable CANYON strata
+  const ledgeMat = new THREE.MeshStandardMaterial({ color: '#8a6a48', roughness: 1 });
+  const ledgeParts = [];
+  for (let i = 0; i < 42; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const lz = 30 - srng() * (TRACK_LENGTH + 60);
+    const lx = side * (10.5 + srng() * 7); // hug the waterline — reads as cut-bank strata
+    const ledge = new THREE.Mesh(new THREE.BoxGeometry(9 + srng() * 15, 0.55, 1.6), ledgeMat);
+    ledge.position.set(lx, bankY(lx, lz) + 0.75 + (i % 4) * 0.9, lz);
+    ledge.rotation.y = (srng() - 0.5) * 0.2;
+    ledgeParts.push(ledge);
+  }
+  const ledges = new THREE.Mesh(mergeStaticMeshes(ledgeParts), ledgeMat);
+  group.add(ledges);
+  // mist — a few soft hover banks over the water far ahead
+  const mistTex = radialGlowTexture('#eaf4ff');
+  const mists = [];
+  for (let i = 0; i < 6; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: mistTex, transparent: true, opacity: 0.13, depthWrite: false,
+    }));
+    sp.scale.set(30 + srng() * 26, 9 + srng() * 6, 1);
+    sp.position.set((srng() - 0.5) * 26, 2.6 + srng() * 2.2, -120 - srng() * (TRACK_LENGTH - 120));
+    group.add(sp);
+    mists.push(sp);
+  }
 
   /* ---------- pine shore: conifers, boulders, driftwood, stilt huts ---------- */
   // r15: reeds alone left the banks bare — a pine treeline plus scattered

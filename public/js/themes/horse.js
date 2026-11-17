@@ -686,6 +686,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const mesaMats = [];
   const mesaBase = ['#b5714a', '#a3654a'];
   const mesaParts = [[], []];
+  const mesaBandParts = [];
   const mesaWobble = [];
   for (let i = 0; i < 10; i++) {
     const side = i % 2 ? 1 : -1;
@@ -703,10 +704,33 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       }
       rings.push(ring);
     }
+    // r16: sediment bands — two thin darker shelves wrapping each mesa body
+    // (real mesas are strata stacks); rings reuse the mesa's own wobble so
+    // they hug the silhouette exactly. srng untouched — the rng stream above
+    // stays byte-identical.
+    const bandParts = []; // per-mesa band shells, spliced onto the mesa below
+    for (const [bt, bs] of [[0.42, 0.99], [0.70, 0.84]]) {
+      const bandRings = [];
+      for (const t of [bt, bt + 0.06]) {
+        const ring = [];
+        for (let k = 0; k < 16; k++) {
+          const a = (k / 16) * Math.PI * 2;
+          const wb = mesaWobble[k] * 1.045;
+          ring.push([Math.cos(a) * (w / 2) * bs * wb, t * h, -Math.sin(a) * (d / 2) * bs * wb]);
+        }
+        bandRings.push(ring);
+      }
+      bandParts.push(new THREE.Mesh(loftSections(bandRings)));
+    }
     const mesh = new THREE.Mesh(loftSections(rings, { capStart: true, capEnd: true }));
     const mx = side * (120 + rng() * 160), mz = -rng() * TRACK_LENGTH;
     mesh.position.set(mx, duneY(mx, mz), mz); // grounded on the dune field (r11)
     mesh.rotation.y = rng() * 3;
+    for (const band of bandParts.splice(0)) { // bands ride the mesa transform
+      band.position.copy(mesh.position);
+      band.rotation.y = mesh.rotation.y;
+      mesaBandParts.push(band);
+    }
     mesaParts[i % 2].push(mesh);
   }
   for (let mi = 0; mi < 2; mi++) {
@@ -714,6 +738,54 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     mesaMats.push(mat);
     group.add(new THREE.Mesh(mergeStaticMeshes(mesaParts[mi]), mat));
   }
+  const mesaBandMat = new THREE.MeshStandardMaterial({ color: '#8a5136', roughness: 1, flatShading: true });
+  group.add(new THREE.Mesh(mergeStaticMeshes(mesaBandParts), mesaBandMat));
+
+  /* ---------- r16 desert floor life: scrub tufts, sand tone patches,
+   * circling birds ---------- */
+  // srng — the shared rng stream stays untouched so existing layouts hold
+  const srng = mulberry32(1881);
+  const scrubMats = ['#7a8a4a', '#96a04f'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+  const scrubParts = [[], []];
+  for (let i = 0; i < 96; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const sx = side * (6.5 + srng() * 34), sz = 14 - srng() * (TRACK_LENGTH + 30);
+    const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.14 + srng() * 0.12, 0.5 + srng() * 0.5, 5), scrubMats[i % 2]);
+    tuft.position.set(sx, duneY(sx, sz) + 0.28, sz);
+    tuft.rotation.z = (srng() - 0.5) * 0.3;
+    scrubParts[i % 2].push(tuft);
+  }
+  const scrubMeshes = scrubParts.map((parts, i) => {
+    const mesh = new THREE.Mesh(mergeStaticMeshes(parts), scrubMats[i]);
+    group.add(mesh);
+    return mesh;
+  });
+  const sandPatchMat = new THREE.MeshStandardMaterial({ color: '#c49a5e', roughness: 1 });
+  const sandPatchParts = [];
+  for (let i = 0; i < 20; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const px = side * (10 + srng() * 42), pz = 20 - srng() * (TRACK_LENGTH + 40);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(5 + srng() * 9, 8), sandPatchMat);
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.set(px, duneY(px, pz) + 0.1, pz);
+    sandPatchParts.push(disc);
+  }
+  group.add(new THREE.Mesh(mergeStaticMeshes(sandPatchParts), sandPatchMat));
+  // vultures — three far gliding silhouettes; static (motion would cost an
+  // update slot for pixels-mostly-missed)
+  const birdMat = new THREE.MeshStandardMaterial({ color: '#3a3f46', roughness: 1 });
+  const birdParts = [];
+  for (let i = 0; i < 3; i++) {
+    const bx = (srng() - 0.5) * 120, by = 34 + srng() * 10, bz = -80 - srng() * (TRACK_LENGTH - 80);
+    for (const wing of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.08, 0.5), birdMat);
+      w.position.set(bx + wing * 1.1, by, bz);
+      w.rotation.z = wing * -0.35;
+      w.rotation.y = srng() * 3;
+      birdParts.push(w);
+    }
+  }
+  group.add(new THREE.Mesh(mergeStaticMeshes(birdParts), birdMat));
 
   // telegraph poles — all 12 poles+crossbars merge into ONE mesh (24 → 1)
   const teleMat = new THREE.MeshStandardMaterial({ color: '#4f3a26', roughness: 1, envMapIntensity: 0.15 });

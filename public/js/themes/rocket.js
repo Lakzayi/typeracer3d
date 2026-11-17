@@ -505,6 +505,27 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   );
   atmo.position.copy(earth.position);
   group.add(atmo);
+  // r16: city lights on the night limb — a point cloud parented to the globe
+  // (inherits its placement), biased to the cap the camera actually sees
+  const earthLightGeo = new THREE.BufferGeometry();
+  const lightPos = new Float32Array(110 * 3);
+  for (let i = 0; i < 110; i++) {
+    const a = rng() * Math.PI * 2;
+    const cap = Math.pow(rng(), 0.6); // bias toward the visible top cap
+    const ph = cap * 0.9;
+    const r = 242;
+    lightPos[i * 3] = Math.cos(a) * Math.sin(ph) * r;
+    lightPos[i * 3 + 1] = Math.cos(ph) * r;
+    lightPos[i * 3 + 2] = Math.sin(a) * Math.sin(ph) * r;
+  }
+  earthLightGeo.setAttribute('position', new THREE.BufferAttribute(lightPos, 3));
+  const earthLightMat = new THREE.PointsMaterial({
+    color: '#ffd98a', size: 2.6, sizeAttenuation: false, transparent: true,
+    opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const earthLights = new THREE.Points(earthLightGeo, earthLightMat);
+  earthLights.rotation.z = 0.35; // same tilt as the globe
+  earth.add(earthLights);
 
   /* ---------- real space below ---------- */
   // r14: the olive launch-complex terrain plane is GONE — with the chase cam
@@ -678,6 +699,58 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     nebulas.push(sp);
   }
 
+  /* ---------- r16 milky way band + bright star layer ---------- */
+  // srng — the shared rng stream stays untouched (existing layouts hold)
+  const srng = mulberry32(424243);
+  // the galactic band: points clustered along a tilted great circle with a
+  // soft gaussian spread — one draw call, reads as the glowing galactic plane
+  const milkyGeo = new THREE.BufferGeometry();
+  const milkyPos = new Float32Array(260 * 3);
+  {
+    // band frame: normal tilted off vertical, two in-plane axes
+    const n = new THREE.Vector3(0.42, 1, 0.18).normalize();
+    const e1 = new THREE.Vector3(1, 0, 0).cross(n).normalize();
+    const e2 = n.clone().cross(e1).normalize();
+    const R = 585;
+    for (let i = 0; i < 260; i++) {
+      const a = srng() * Math.PI * 2;
+      const spread = (srng() + srng() + srng() - 1.5) * 0.16; // soft gaussian
+      const px = Math.cos(a) * R, py = Math.sin(a) * R;
+      milkyPos[i * 3] = (e1.x * px + e2.x * py + n.x * spread * R) * 1;
+      milkyPos[i * 3 + 1] = (e1.y * px + e2.y * py + n.y * spread * R) * 1 + 40;
+      milkyPos[i * 3 + 2] = (e1.z * px + e2.z * py + n.z * spread * R) * 1 - 200;
+    }
+  }
+  milkyGeo.setAttribute('position', new THREE.BufferAttribute(milkyPos, 3));
+  const milkyMat = new THREE.PointsMaterial({
+    color: '#dfe8ff', size: 2.4, sizeAttenuation: false, transparent: true,
+    opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const milky = new THREE.Points(milkyGeo, milkyMat);
+  group.add(milky);
+  // hero stars — a sparse layer of brighter, warmer/cooler points
+  const heroGeo = new THREE.BufferGeometry();
+  const heroPos = new Float32Array(140 * 3);
+  const heroCol = new Float32Array(140 * 3);
+  const heroTints = [[1, 0.96, 0.88], [1, 1, 1], [0.85, 0.9, 1]];
+  for (let i = 0; i < 140; i++) {
+    const th = srng() * Math.PI * 2, ph = srng() * Math.PI;
+    const r = 590;
+    heroPos[i * 3] = Math.cos(th) * Math.sin(ph) * r;
+    heroPos[i * 3 + 1] = Math.cos(ph) * r * 0.9 + 40;
+    heroPos[i * 3 + 2] = Math.sin(th) * Math.sin(ph) * r - 200;
+    const t = heroTints[(srng() * 3) | 0];
+    heroCol[i * 3] = t[0]; heroCol[i * 3 + 1] = t[1]; heroCol[i * 3 + 2] = t[2];
+  }
+  heroGeo.setAttribute('position', new THREE.BufferAttribute(heroPos, 3));
+  heroGeo.setAttribute('color', new THREE.BufferAttribute(heroCol, 3));
+  const heroMat = new THREE.PointsMaterial({
+    size: 3.4, sizeAttenuation: false, vertexColors: true, transparent: true,
+    opacity: 0.25, depthWrite: false, fog: false,
+  });
+  const heroStars = new THREE.Points(heroGeo, heroMat);
+  group.add(heroStars);
+
   // launch-day sky dome — deep blue zenith → pale haze horizon with a real
   // ~2° sun disc (shared.js), replacing the flat background + washed 90-unit
   // sprite blob (critic r10 #2). Stars sit INSIDE the dome radius so they
@@ -687,7 +760,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
 
   // stars/nebulas ride along with the player, and Earth stays centered below
   // (otherwise the camera exits the "sky" mid-track)
-  const celestial = [sky, stars, ...nebulas];
+  const celestial = [sky, stars, milky, heroStars, ...nebulas];
 
   /* ---------- start + finish ---------- */
   const gateZ = buildFinishGate(group, TRACK_LENGTH, { text: '🚀 FINISH 🚀' });
@@ -749,6 +822,11 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.ambient.intensity = tod.ambient;
     starMat.opacity = tod.stars;
     nebulas.forEach((n) => (n.material.opacity = name === 'night' ? 0.2 : name === 'sunset' ? 0.17 : 0.06));
+    // r16: galactic band + hero stars peak at night; earth's city lights only
+    // exist once the sun is off the globe
+    milkyMat.opacity = name === 'night' ? 0.72 : name === 'sunset' ? 0.4 : 0.16;
+    heroMat.opacity = name === 'night' ? 0.95 : name === 'sunset' ? 0.5 : 0.25;
+    earthLightMat.opacity = name === 'night' ? 0.95 : name === 'sunset' ? 0.4 : 0;
     // rings at physical subtlety — no neon arcade hoops in the sky (critic r5)
     ringMat.opacity = Math.min(0.13, 0.22 * tod.rings);
     // worn runway paint on concrete: pale yellow by day, faint at night (r5)

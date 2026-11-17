@@ -764,17 +764,24 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // distant mountains — 12 separate Meshes merged into one (12 → 1 draw calls).
   // r12: noise-jittered flanks — clean 5-sided pyramids read as low-poly props
   // even at distance (modeling mandate: real silhouettes)
-  const mountainMeshes = [];
-  const mountainMat = new THREE.MeshStandardMaterial({ color: '#6f87a8', roughness: 1, flatShading: true });
+  // r16: TWO distance planes — the far range lifts toward the sky color
+  // (atmospheric perspective) so the white cones stop reading as paper cutouts
+  const mountainMats = [
+    new THREE.MeshStandardMaterial({ color: '#6f87a8', roughness: 1, flatShading: true }), // near range
+    new THREE.MeshStandardMaterial({ color: '#96abc8', roughness: 1, flatShading: true }), // far range
+  ];
+  const mountainMeshes = [[], []];
   for (let i = 0; i < 12; i++) {
     const h = 40 + rng() * 70;
-    const mt = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(30 + rng() * 40, h, 7), { amp: 0.13, seed: 70 + i, freq: 1.6 }), mountainMat);
+    const mt = new THREE.Mesh(jitterRock(new THREE.ConeGeometry(30 + rng() * 40, h, 7), { amp: 0.13, seed: 70 + i, freq: 1.6 }), mountainMats[0]);
     const side = i % 2 ? 1 : -1;
     mt.position.set(side * (130 + rng() * 160), h / 2 - 4, -rng() * TRACK_LENGTH);
-    mountainMeshes.push(mt);
+    mountainMeshes[Math.abs(mt.position.x) > 230 ? 1 : 0].push(mt);
   }
-  const mountains = new THREE.Mesh(mergeStaticMeshes(mountainMeshes), mountainMat);
-  group.add(mountains);
+  const mountains = new THREE.Mesh(mergeStaticMeshes(mountainMeshes[0]), mountainMats[0]);
+  const mountainsFar = new THREE.Mesh(mergeStaticMeshes(mountainMeshes[1]), mountainMats[1]);
+  group.add(mountains, mountainsFar);
+  mountainMats.forEach((m) => m.userData.base = m.color.clone());
 
   // clouds — merged into ONE mesh; fewer, smaller, higher puffs so the sunny
   // blue actually shows through (critic r6: white wash covered the sky)
@@ -783,19 +790,59 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   for (let i = 0; i < 8; i++) {
     const cx = (rng() - 0.5) * 300, cy = 70 + rng() * 35, cz = -rng() * (TRACK_LENGTH + 100);
     for (let j = 0; j < 3; j++) {
-      const puff = new THREE.Mesh(new THREE.SphereGeometry(4 + rng() * 3.5, 7, 5), cloudMat);
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(5.5 + rng() * 4.5, 7, 5), cloudMat);
       puff.position.set(cx + j * 6 - 6 + rng() * 3, cy + rng() * 2, cz + rng() * 4);
-      puff.scale.y = 0.55;
+      puff.scale.y = 0.5;
       cloudPuffs.push(puff);
     }
   }
   const clouds = new THREE.Mesh(mergeStaticMeshes(cloudPuffs), cloudMat);
   group.add(clouds);
 
+  /* ---------- r16 meadow life: tone patches + wildflowers ---------- */
+  // the lawn read as one flat paint fill (r16 critic): big soft tone patches
+  // break it up, and wildflower confetti near the road gives the eye candy.
+  // Everything uses srng — the shared rng stream stays untouched so every
+  // existing layout (trees/city/lamps) keeps its exact seed.
+  const srng = mulberry32(90210);
+  const patchMats = ['#7fb35a', '#93c04f', '#a9cb63'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+  const patchParts = [[], [], []];
+  for (let i = 0; i < 30; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const px = side * (10 + srng() * 52), pz = 20 - srng() * (TRACK_LENGTH + 40);
+    const patch = new THREE.Mesh(new THREE.CircleGeometry(6 + srng() * 10, 9), patchMats[i % 3]);
+    patch.rotation.x = -Math.PI / 2;
+    patch.rotation.z = srng() * 3;
+    patch.position.set(px, 0.09, pz);
+    patchParts[i % 3].push(patch);
+  }
+  const patchMeshes = patchParts.map((parts, i) => {
+    const mesh = new THREE.Mesh(mergeStaticMeshes(parts), patchMats[i]);
+    group.add(mesh);
+    return mesh;
+  });
+  const flowerMats = ['#ffe14d', '#fff6f0', '#ff8aa0'].map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.9 }));
+  const flowerParts = [[], [], []];
+  for (let i = 0; i < 210; i++) {
+    const side = srng() > 0.5 ? 1 : -1;
+    const fx = side * (8 + srng() * 22), fz = 10 - srng() * (TRACK_LENGTH + 20);
+    const bloom = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), flowerMats[i % 3]);
+    bloom.position.set(fx, 0.22, fz);
+    bloom.rotation.y = srng() * 3;
+    flowerParts[i % 3].push(bloom);
+  }
+  const flowerMeshes = flowerParts.map((parts, i) => {
+    const mesh = new THREE.Mesh(mergeStaticMeshes(parts), flowerMats[i]);
+    group.add(mesh);
+    return mesh;
+  });
+
   // scenery that must sink BELOW the night sky as silhouettes (critic r5:
   // mountains/clouds/trees stayed brighter than the sky at night)
   const sceneryDim = [
-    { mat: mountainMat, base: mountainMat.color.clone() },
+    ...mountainMats.map((m) => ({ mat: m, base: m.color.clone() })),
+    ...patchMats.map((m) => ({ mat: m, base: m.color.clone() })),
+    ...flowerMats.map((m) => ({ mat: m, base: m.color.clone() })),
     { mat: cloudMat, base: cloudMat.color.clone() },
     { mat: trunkMesh.material, base: trunkMesh.material.color.clone() },
     { mat: crownMesh.material, base: crownMesh.material.color.clone() },
