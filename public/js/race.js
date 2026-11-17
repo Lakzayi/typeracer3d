@@ -40,6 +40,7 @@ export class RaceController {
     this.mpDeath = mpDeath && mode === 'mp'; // online: a mistake throws you back to the start line
     this.hpMax = mode === 'mp' ? Math.max(0, Math.min(3, hpMax | 0)) : 0; // ❤️ hp: N mistakes forgiven, then the start line
     this.hpLeft = this.hpMax;
+    this.hpLostTotal = 0; // hearts burned across every reset cycle (results)
     this.mistakes = new Map(); // "expected|typed" -> count (worst-keys panel)
     this.resetCount = 0;
     this.wordsMode = wordsMode && mode === 'mp'; // 🔤 word race: death resets reshuffle the words
@@ -143,9 +144,11 @@ export class RaceController {
 
   /* ❤️ hp mode — a mistake burns a heart: no reset, and the popup shows what
    * went wrong so the player can self-correct. At 0 hearts the next mistake
-   * takes you back to the start line (the death-mode reset). */
+   * takes you back to the start line (the death-mode reset) — and that reset
+   * refills the hearts: every fresh attempt gets the full set again. */
   _hpHit(expected, typed) {
     this.hpLeft--;
+    this.hpLostTotal++;
     this.hud.setHearts(this.hpLeft, this.hpMax, true);
     this.hud.mistakeFlash(expected, typed, this.typing.spans[this.typing.pos]?.getBoundingClientRect?.());
     const left = this.hpLeft;
@@ -159,6 +162,10 @@ export class RaceController {
    * The vehicle whooshes back to z=0 through the smooth visual lerp. */
   _deathReset() {
     this.resetCount++;
+    if (this.hpMax) { // ❤️ the reset IS the death: fresh attempt, fresh hearts
+      this.hpLeft = this.hpMax;
+      this.hud.setHearts(this.hpLeft, this.hpMax, false);
+    }
     if (this.wordsMode) {
       /* 🔤 word race — the restart is never memorizable: same words, fresh
        * order. setText rebuilds the panel; lifetime errors must survive it. */
@@ -181,7 +188,7 @@ export class RaceController {
     this.hud.centerMsg('💀 back to the start line!');
     clearTimeout(this._resetMsgT);
     this._resetMsgT = setTimeout(() => this.hud.centerMsg(''), 1400);
-    this.hud.toast(`💀 mistake #${this.resetCount} — back to the start`, 1900);
+    this.hud.toast(`💀 mistake #${this.resetCount} — back to the start${this.hpMax ? ' · ❤️ hearts refilled' : ''}`, 1900);
   }
 
   /* death mode — the first mistake is fatal: the car coasts to a stop and the
@@ -304,7 +311,7 @@ export class RaceController {
       mode: this.mode,
       died: this.died ? { progress01: rows.find((r) => r.isPlayer).progress01 } : null,
       mpDeath: this.mpDeath, resets: this.resetCount,
-      hpMax: this.hpMax, hpLost: this.hpMax - this.hpLeft,
+      hpMax: this.hpMax, hpLost: this.hpLostTotal,
     };
     this.hud.onResults(this.results);
   }
