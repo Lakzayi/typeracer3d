@@ -1143,10 +1143,18 @@ async function mpHostStart() {
       source = 'custom text';
       raceId = 'mp-' + Date.now().toString(36);
     } else if (type === 'words') {
-      const count = Math.max(5, Math.min(300, Number($('mpWordCount').value) || 25));
-      const lang = getLanguage(settings.language);
-      text = generateWordText(settings.language, count);
-      source = `${count} random words · ${lang.flag} ${lang.name}`;
+      /* host's own words (dot-separated: سلام.خوبی.وای) win over the random
+       * generator — empty box falls back to the language word pool */
+      const custom = $('mpCustomWords').value.split('.').map((w) => w.trim()).filter(Boolean).slice(0, 300);
+      if (custom.length) {
+        text = custom.join(' ');
+        source = `${custom.length} custom words`;
+      } else {
+        const count = Math.max(5, Math.min(300, Number($('mpWordCount').value) || 25));
+        const lang = getLanguage(settings.language);
+        text = generateWordText(settings.language, count);
+        source = `${count} random words · ${lang.flag} ${lang.name}`;
+      }
       raceId = 'mp-words-' + Date.now().toString(36);
       words = true;
     } else {
@@ -1254,6 +1262,7 @@ $('mpRaceType').addEventListener('change', () => {
   const type = $('mpRaceType').value;
   $('mpCustomText').classList.toggle('hidden', type !== 'custom');
   $('mpWordCount').classList.toggle('hidden', type !== 'words');
+  $('mpCustomWords').classList.toggle('hidden', type !== 'words');
 });
 $('mpLang').addEventListener('change', (e) => {
   settings.language = e.target.value;
