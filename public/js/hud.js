@@ -192,17 +192,18 @@ export class HUD {
 
   updateCombo(combo) {
     const el = this.els.comboBadge;
-    if (combo >= 10) {
-      el.classList.remove('hidden');
-      el.textContent = `🔥 ${combo} combo`;
-      el.classList.toggle('hot', combo >= 50);
-    } else {
-      el.classList.add('hidden');
-    }
+    // dirty-checked: identical writes were landing 60×/s (layout churn)
+    const on = combo >= 10;
+    if (this._cComboOn !== on) { this._cComboOn = on; el.classList.toggle('hidden', !on); }
+    if (!on) return;
+    if (this._cCombo !== combo) { this._cCombo = combo; el.textContent = `🔥 ${combo} combo`; }
+    const hot = combo >= 50;
+    if (this._cComboHot !== hot) { this._cComboHot = hot; el.classList.toggle('hot', hot); }
   }
 
   setSpeedGlow(v01) {
-    this.els.vignette.style.opacity = (v01 * 0.75).toFixed(3);
+    const op = (v01 * 0.75).toFixed(3);
+    if (this._cGlow !== op) { this._cGlow = op; this.els.vignette.style.opacity = op; }
   }
 
   /* speed blur — GPU backdrop blur on the screen edges only; the center of
@@ -235,18 +236,28 @@ export class HUD {
     state.forEach((s, i) => {
       const row = this.boardRows[i];
       if (!row) return;
-      row.bar.style.width = (s.progress01 * 100).toFixed(1) + '%';
-      row.wm.textContent = `${Math.round(s.wpm)} wpm`;
-      row.row.classList.toggle('done', !!s.finished);
+      // per-row dirty checks — the board was writing identical text/styles 60×/s
+      const width = (s.progress01 * 100).toFixed(1) + '%';
+      if (row._w !== width) { row._w = width; row.bar.style.width = width; }
+      const wm = `${Math.round(s.wpm)} wpm`;
+      if (row._wm !== wm) { row._wm = wm; row.wm.textContent = wm; }
+      const done = !!s.finished;
+      if (row._done !== done) { row._done = done; row.row.classList.toggle('done', done); }
     });
   }
 
   updateStats(racersState, typing, rank, outOf) {
     const s = racersState[0];
-    this.els.rankBig.textContent = ORD[rank - 1] ?? `${rank}th`;
-    this.els.rankOf.textContent = `of ${outOf} racers`;
-    this.els.wpmVal.textContent = Math.round(s.wpm);
-    this.els.accVal.textContent = typing.accuracy().toFixed(1);
+    // every field cached — only changed text hits the DOM (rankOf never
+    // changes mid-race, yet was written every frame)
+    const rankTxt = ORD[rank - 1] ?? `${rank}th`;
+    if (this._cRank !== rankTxt) { this._cRank = rankTxt; this.els.rankBig.textContent = rankTxt; }
+    const ofTxt = `of ${outOf} racers`;
+    if (this._cOf !== ofTxt) { this._cOf = ofTxt; this.els.rankOf.textContent = ofTxt; }
+    const wpmTxt = Math.round(s.wpm);
+    if (this._cWpm !== wpmTxt) { this._cWpm = wpmTxt; this.els.wpmVal.textContent = wpmTxt; }
+    const accTxt = typing.accuracy().toFixed(1);
+    if (this._cAcc !== accTxt) { this._cAcc = accTxt; this.els.accVal.textContent = accTxt; }
   }
 
   centerMsg(text, cls = '') {

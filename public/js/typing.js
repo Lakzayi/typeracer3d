@@ -216,7 +216,8 @@ export class TypingEngine {
   recentWpm(windowMs = 4000) {
     const now = this._now();
     const cutoff = now - windowMs;
-    let past = { t: this.startedAt ?? now, c: 0 };
+    const past = this._past ?? (this._past = { t: 0, c: 0 }); // reused scratch
+    past.t = this.startedAt ?? now; past.c = 0;
     for (let i = this.hits.length - 1; i >= 0; i--) {
       if (this.hits[i].t <= cutoff) { past = this.hits[i]; break; }
     }

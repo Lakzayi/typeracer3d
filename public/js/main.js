@@ -1319,6 +1319,7 @@ $('mpGarageBtn').addEventListener('click', openGarage);
 /* ---------------- render loop ---------------- */
 
 let lastT = performance.now();
+let menuState = null; // parked-menu racer states — reused, never reallocated
 function loop(t) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (t - lastT) / 1000);
@@ -1346,7 +1347,13 @@ function loop(t) {
       hud.updateCombo(typing.combo);
     }
   } else if (world.theme) {
-    world.update(dt, world.theme.vehicles.map((v) => ({ progress01: 0, speed01: 0, wpm: 0, hideLabel: true })));
+    // parked menu backdrop — one zero-state array reused per vehicle count
+    // (this line used to allocate N objects every frame, forever)
+    const n = world.theme.vehicles.length;
+    if (!menuState || menuState.length !== n) {
+      menuState = Array.from({ length: n }, () => ({ progress01: 0, speed01: 0, wpm: 0, hideLabel: true }));
+    }
+    world.update(dt, menuState);
   }
 
   world.render();

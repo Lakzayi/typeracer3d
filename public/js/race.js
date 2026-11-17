@@ -41,6 +41,7 @@ export class RaceController {
     this.hpMax = mode === 'mp' ? Math.max(0, Math.min(3, hpMax | 0)) : 0; // ❤️ hp: N mistakes forgiven, then the start line
     this.hpLeft = this.hpMax;
     this.hpLostTotal = 0; // hearts burned across every reset cycle (results)
+    this._order = []; // reused standings scratch — sort() runs in place
     this.mistakes = new Map(); // "expected|typed" -> count (worst-keys panel)
     this.resetCount = 0;
     this.wordsMode = wordsMode && mode === 'mp'; // 🔤 word race: death resets reshuffle the words
@@ -354,13 +355,19 @@ export class RaceController {
       if (s.errorT > 0) s.errorT -= dt;
       if (r.errorT) { s.errorT = r.errorT; r.errorT = 0; }
     }
-    // live standings
-    const order = this.state.map((s, i) => ({ i, s }))
-      .sort((a, b) => {
-        if (a.s.finished && b.s.finished) return (a.s.finishT ?? 0) - (b.s.finishT ?? 0);
-        return b.s.progress01 - a.s.progress01;
-      });
-    order.forEach((o, idx) => { o.s.rank = idx + 1; });
+    // live standings — the scratch array is preallocated and re-pointed each
+    // frame (the old map() allocated N objects per frame = pure GC fodder)
+    if (this._order.length !== this.state.length) {
+      this._order.length = this.state.length;
+      for (let i = 0; i < this.state.length; i++) this._order[i] = { i, s: this.state[i] };
+    } else {
+      for (let i = 0; i < this.state.length; i++) { this._order[i].i = i; this._order[i].s = this.state[i]; }
+    }
+    this._order.sort((a, b) => {
+      if (a.s.finished && b.s.finished) return (a.s.finishT ?? 0) - (b.s.finishT ?? 0);
+      return b.s.progress01 - a.s.progress01;
+    });
+    this._order.forEach((o, idx) => { o.s.rank = idx + 1; });
 
     // overtake / lost-position notifications
     const rank = this.state[0].rank;
