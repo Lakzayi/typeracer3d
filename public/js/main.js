@@ -4,6 +4,7 @@
 
 import { API } from './api.js';
 import { World, hashSeed, setTrackLength, BASE_TRACK } from './world.js';
+import { GFX, QualityGate, applyQuality } from './gfx.js';
 import { THEMES } from './themes/index.js';
 import { TypingEngine } from './typing.js';
 import { RaceController } from './race.js';
@@ -42,7 +43,7 @@ let lastPracticeId = null;
 
 const SETTINGS_KEY = 'tr3d_settings_v1';
 const settings = Object.assign(
-  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, keySound: true, ghostOn: false, language: 'en' },
+  { typingMode: 'realistic', timeOfDay: 'day', soundOn: true, keySound: true, ghostOn: false, language: 'en', gfx: 'auto' },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
 );
 
@@ -79,10 +80,12 @@ function applySettingsToUI() {
   $('typingMode').value = settings.typingMode;
   $('timeOfDay').value = settings.timeOfDay;
   $('language').value = settings.language;
+  $('gfxQuality').value = settings.gfx ?? 'auto';
   applyLanguageDir();
   hud.els.soundBtn.textContent = settings.soundOn ? '🔊' : '🔇';
   sound.enabled = settings.soundOn;
   syncKeySoundUI();
+  applyGfxSetting(); // r17: restore the saved quality choice (or auto gate)
 }
 
 /* ⌨️ mechanical typing clicks — independent of the master mute */
@@ -108,6 +111,30 @@ $('timeOfDay').addEventListener('change', (e) => {
   settings.timeOfDay = e.target.value;
   saveSettings();
   world?.theme?.setTimeOfDay?.(settings.timeOfDay);
+});
+
+/* graphics quality (r17): 'auto' runs the measured fps gate; a manual choice
+ * always overrides it. Applied to the live world immediately. */
+$('gfxQuality').addEventListener('change', (e) => {
+  settings.gfx = e.target.value;
+  saveSettings();
+  applyGfxSetting();
+});
+
+function applyGfxSetting() {
+  if (!GFX || !world) return;
+  if (settings.gfx === 'auto') {
+    GFX.auto = true; // gate resumes from the current level
+  } else {
+    GFX.auto = false;
+    QualityGate.state = settings.gfx; // keep the gate's view consistent
+    applyQuality(world, settings.gfx);
+  }
+}
+
+/* auto-gate flip → small toast so the change isn't mysterious (doc 16) */
+window.addEventListener('tr3d-gfx', (e) => {
+  hud.toast(e.detail === 'high' ? '✨ graphics quality restored' : '⚡ graphics auto-adjusted for smoothness', 2000);
 });
 
 $('language').addEventListener('change', (e) => {
@@ -1325,6 +1352,7 @@ function loop(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
   if (!world) return;
+  QualityGate.update(world, dt); // r17: measured fps gate — no timers
 
   if (race) {
     race.update(dt);

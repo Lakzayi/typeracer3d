@@ -12,6 +12,9 @@
  */
 export const GFX = {
   enabled: true, // master switch (the fps auto-gate also writes this)
+  auto: true,    // measured fps gate runs unless the user picks a level
+  bloomAllowed: true, // gate level control — setBloom() ANDs this in
+  dprCap: 2,          // gate level control — world.setDPRCap() consumes it
 
   /* bloom { strength, radius, threshold } per time-of-day; DEFAULT is used
    * unless a theme overrides (rocket: the space race owns real HDR sources —
@@ -42,3 +45,48 @@ export const GFX = {
     return t[todName] ?? this.bloom.DEFAULT[todName] ?? this.bloom.DEFAULT.day;
   },
 };
+
+/* ---------------- quality auto-gate (r17, tr3d-graphics-docs/16) ------------
+ * Measured INSIDE the existing loop — no timers (SPEC §1.3). A 2s window of
+ * rAF deltas decides: <42fps sustained → drop bloom, then the DPR cap;
+ * >58fps sustained → step back up. ±hysteresis + a 6s cooldown keep the gate
+ * from yoyo-ing; a manual settings.gfx choice overrides everything. */
+export const QualityGate = {
+  state: 'high', // high → med (bloom off) → low (dpr 1.5)
+  acc: 0,
+  frames: 0,
+  cooldown: 0,
+  update(world, dt) {
+    if (!GFX.auto || !world) return;
+    this.acc += dt;
+    this.frames++;
+    if (this.cooldown > 0) this.cooldown -= dt;
+    if (this.acc < 2.0) return;
+    const fps = this.frames / this.acc;
+    this.acc = 0;
+    this.frames = 0;
+    if (this.cooldown > 0) return; // settle before judging again
+    const prev = this.state;
+    if (fps < 42 && this.state === 'high') this.state = 'med';
+    else if (fps < 42 && this.state === 'med') this.state = 'low';
+    else if (fps > 58 && this.state === 'med') this.state = 'high';
+    else if (fps > 58 && this.state === 'low') this.state = 'med';
+    if (this.state !== prev) {
+      applyQuality(world, this.state);
+      this.cooldown = 6;
+      window.dispatchEvent(new CustomEvent('tr3d-gfx', { detail: this.state }));
+    }
+  },
+};
+
+export function applyQuality(world, state) {
+  GFX.level = state;
+  GFX.bloomAllowed = state === 'high';
+  GFX.dprCap = state === 'low' ? 1.5 : 2;
+  if (world) {
+    // re-apply the theme's parked bloom preset under the new gate level
+    if (world._pendingBloom) world.setBloom(world._pendingBloom[0], world._pendingBloom[1]);
+    else if (world.bloomPass) world.bloomPass.enabled = GFX.bloomAllowed;
+    world.setDPRCap(GFX.dprCap);
+  }
+}

@@ -38,7 +38,8 @@ export class World {
       canvas, antialias: true,
       powerPreference: 'high-performance', // hint the compositor: this tab is a game
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this._dprCap = 2; // the quality gate lowers this to 1.5 on weak devices
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this._dprCap));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // shadow maps redraw at half rate (see render) — moving-car shadows at
@@ -243,10 +244,18 @@ export class World {
     this._pendingBloom = [themeKey, todName];
     if (!this.bloomPass) return;
     const p = GFX.for(themeKey, todName);
-    this.bloomPass.enabled = GFX.enabled && p.strength > 0.001;
+    this.bloomPass.enabled = GFX.enabled && GFX.bloomAllowed && p.strength > 0.001;
     this.bloomPass.strength = p.strength;
     this.bloomPass.radius = p.radius;
     this.bloomPass.threshold = p.threshold;
+  }
+
+  /* quality gate lever (gfx.js applyQuality) — _resize() re-syncs the
+   * composer + bloom mip chain to the new drawing-buffer size */
+  setDPRCap(cap) {
+    this._dprCap = cap;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
+    this._resize();
   }
 
   /* tiny gradient sky + ground patch rendered through PMREM (GRAPHICS_PLAN §1.5,
