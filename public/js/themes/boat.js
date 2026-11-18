@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock, superRing, loftSections, makeDunes, displaceGroundPlane } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock, superRing, loftSections, makeDunes, displaceGroundPlane, buildLampCones } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -785,7 +785,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const poleMat = new THREE.MeshStandardMaterial({ color: '#5d4630', roughness: 1 });
   const lampHeadMat = new THREE.MeshBasicMaterial({ color: '#8b9099' });
   const poolMat = new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-  const dockParts = [], postParts = [], headParts = [], poolParts = [];
+  const dockParts = [], postParts = [], headParts = [], poolParts = [], lampSpots = [];
   for (let i = 0; i < 10; i++) {
     const side = i % 2 ? 1 : -1;
     const z = -40 - i * (TRACK_LENGTH / 10) - rng() * 20;
@@ -804,12 +804,15 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     pool.rotation.x = -Math.PI / 2;
     pool.position.set(side * 8.4, 0.46, z);
     dockParts.push(dock); postParts.push(post); headParts.push(head); poolParts.push(pool);
+    lampSpots.push({ x: side * 10.2, y: 4.66, z });
   }
   const docks = new THREE.Mesh(mergeStaticMeshes(dockParts), dockMat); docks.castShadow = true;
   const dockPosts = new THREE.Mesh(mergeStaticMeshes(postParts), poleMat); dockPosts.castShadow = true;
   const dockHeads = new THREE.Mesh(mergeStaticMeshes(headParts), lampHeadMat);
   const dockPools = new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat);
-  group.add(docks, dockPosts, dockHeads, dockPools);
+  // P2 r17: dock lantern shafts down to the waterline — one merged mesh
+  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.4, baseY: 0.42 });
+  group.add(docks, dockPosts, dockHeads, dockPools, lampCones.mesh);
 
   /* ---------- sky + stars + moon ---------- */
   // shader dome (shared.js) — skyLow carries the warm band just over the
@@ -949,6 +952,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     // (critic r5: reeds kept their day green under orange light)
     reedMat.color.set(name === 'sunset' ? '#5c5638' : name === 'night' ? '#2c3a2a' : '#4d7d3a');
     poolMat.opacity = tod.lanterns * 0.55;
+    lampCones.setOpacity(tod.lanterns * 0.3); // P2: lantern shafts
+    lampCones.mesh.visible = tod.lanterns > 0.01;
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
     if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     vehicles.forEach((v) => {

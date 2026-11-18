@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane, loftSections, loftTube, jitterRock } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane, loftSections, loftTube, jitterRock, buildLampCones } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -872,7 +872,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const lampGlowTex = radialGlowTexture('#ffcf8a');
   const lampHeadMat = new THREE.MeshBasicMaterial({ color: '#8b9099' });
   const poolMat = new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-  const poleParts = [], headParts = [], poolParts = [];
+  const poleParts = [], headParts = [], poolParts = [], lampSpots = [];
   for (let i = 0; i < 14; i++) {
     const side = i % 2 ? 1 : -1;
     const z = -20 - i * (TRACK_LENGTH / 14);
@@ -886,12 +886,15 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     poleParts.push(post);
     headParts.push(head);
     poolParts.push(pool);
+    lampSpots.push({ x: side * 8.2, y: 3.66, z });
   }
   const lampPosts = new THREE.Mesh(mergeStaticMeshes(poleParts), teleMat);
   lampPosts.castShadow = true;
   const lampHeads = new THREE.Mesh(mergeStaticMeshes(headParts), lampHeadMat);
   const pools = [new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat)];
-  group.add(lampPosts, lampHeads, pools[0]);
+  // P2 r17: lantern light shafts — one merged additive mesh (TOD-driven)
+  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.5 });
+  group.add(lampPosts, lampHeads, pools[0], lampCones.mesh);
 
   /* ---------- sky + stars + moon ---------- */
   // shader dome (shared.js): real blue zenith + dusty warm horizon band
@@ -999,6 +1002,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       else m.color.set(mesaBase[i % 2]);
     });
     pools.forEach((p) => (p.material.opacity = tod.lanterns * 0.55));
+    lampCones.setOpacity(tod.lanterns * 0.3); // P2: light shafts
+    lampCones.mesh.visible = tod.lanterns > 0.01;
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
     if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     // the lamp head is an emitting surface: let it punch through tone mapping

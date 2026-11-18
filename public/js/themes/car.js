@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock, superRing, loftSections } from './shared.js';
+import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock, superRing, loftSections, buildLampCones } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -887,7 +887,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const lampHeadMat = new THREE.MeshBasicMaterial({ color: '#ffe6b0' });
   const lampPoleMat = new THREE.MeshStandardMaterial({ color: '#2b3038', roughness: 0.9 });
   const lampPoolMat = new THREE.MeshBasicMaterial({ map: lampGlowTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-  const lampPoleMeshes = [], lampHeadMeshes = [], lampPoolMeshes = [];
+  const lampPoleMeshes = [], lampHeadMeshes = [], lampPoolMeshes = [], lampSpots = [];
   for (let i = 0; i < 16; i++) {
     const side = i % 2 ? 1 : -1;
     const z = -20 - i * (TRACK_LENGTH / 16);
@@ -903,12 +903,16 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     lampPoleMeshes.push(pole, arm);
     lampHeadMeshes.push(head);
     lampPoolMeshes.push(pool);
+    lampSpots.push({ x: side * 6.2, y: 5.18, z });
   }
   const lampPoles = new THREE.Mesh(mergeStaticMeshes(lampPoleMeshes), lampPoleMat);
   lampPoles.castShadow = true;
   const lampHeads = new THREE.Mesh(mergeStaticMeshes(lampHeadMeshes), lampHeadMat);
   const lampPools = new THREE.Mesh(mergeStaticMeshes(lampPoolMeshes), lampPoolMat);
-  group.add(lampPoles, lampHeads, lampPools);
+  // P2 r17: the light shafts themselves — one merged additive mesh, opacity
+  // per TOD (driven next to the pools in setTimeOfDay)
+  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.8 });
+  group.add(lampPoles, lampHeads, lampPools, lampCones.mesh);
 
   /* ---------- sky dome + stars + moon ---------- */
   // shader dome: eased atmospheric gradient + real ~2° sun disc (shared.js);
@@ -1035,6 +1039,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     });
     lampPoolMat.opacity = tod.lamps * 0.8;
     lampPools.visible = tod.lamps > 0.01; // skip the pools' draw call by day
+    lampCones.setOpacity(tod.lamps * 0.3); // P2: light shafts, night charm
+    lampCones.mesh.visible = tod.lamps > 0.01;
     lampHeadMat.color.set(tod.lamps > 0.3 ? '#ffe6b0' : '#8b9099');
     lampHeadMat.toneMapped = tod.lamps <= 0.3; // night head = brightest element (critic r5)
     if (tod.lamps > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo

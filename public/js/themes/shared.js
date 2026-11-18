@@ -427,9 +427,15 @@ function mergeParts(parts) {
   const pos = new Float32Array(total * 3);
   const nor = new Float32Array(total * 3);
   const uvs = new Float32Array(total * 2);
+  // r17: carry a per-vertex color attribute through the merge when EVERY part
+  // has one (lamp cones bake an alpha gradient; itemSize 4 = rgba)
+  const colN = parts.every(({ geo }) => geo.attributes.color)
+    ? parts[0].geo.attributes.color.itemSize : 0;
+  const col = colN ? new Float32Array(total * colN) : null;
   let o = 0;
   for (const { geo, matrix } of parts) {
     const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+    const ca = colN ? geo.attributes.color : null;
     const idx = geo.index;
     const count = idx ? idx.count : p.count;
     _mgNM.getNormalMatrix(matrix);
@@ -440,6 +446,7 @@ function mergeParts(parts) {
       _mgN.fromBufferAttribute(n, vi).applyMatrix3(_mgNM).normalize();
       nor[(o + k) * 3] = _mgN.x; nor[(o + k) * 3 + 1] = _mgN.y; nor[(o + k) * 3 + 2] = _mgN.z;
       if (uv) { uvs[(o + k) * 2] = uv.getX(vi); uvs[(o + k) * 2 + 1] = uv.getY(vi); }
+      if (ca) for (let ci = 0; ci < colN; ci++) col[(o + k) * colN + ci] = ca.getComponent(vi, ci);
     }
     o += count;
   }
@@ -447,6 +454,7 @@ function mergeParts(parts) {
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  if (col) g.setAttribute('color', new THREE.BufferAttribute(col, colN));
   return g;
 }
 
@@ -474,6 +482,64 @@ export function mergeStaticMeshes(meshes) {
     mesh.geometry.dispose();
   }
   return g;
+}
+
+/* ---------------- P2 r17: pseudo-volumetric lamp cones ----------------------
+ * One additive cone per lamp: the vertical falloff (bright at the bulb,
+ * near-zero at the ground rim) comes from uv.y and the edge softness from a
+ * view-ray fade in the fragment shader — a light shaft reads as volume with
+ * no custom attributes and no per-frame cost. Each theme merges all its cones
+ * into ONE draw call and drives setOpacity() per time-of-day (day:
+ * mesh.visible = false skips the draw entirely, §1.3).
+ * NOTE: deliberately NO vertex-color attribute here — a merged itemSize-4
+ * color attribute fed NaN into the bloom chain on some GPUs (r17 horse-night
+ * black-frame bug); position/normal/uv are the battle-tested merge paths.
+ * spots: [{ x, y, z }] lamp-head positions; the cone drops to baseY. */
+export function buildLampCones(spots, { color = '#ffd9a0', radius = 1.5, baseY = 0.02, seg = 9 } = {}) {
+  const c = new THREE.Color(color);
+  const parts = [];
+  for (const s of spots) {
+    const h = Math.max(0.6, s.y - baseY);
+    const geo = new THREE.ConeGeometry(radius, h, seg, 1, true);
+    const m = new THREE.Mesh(geo);
+    m.position.set(s.x, s.y - h / 2, s.z);
+    parts.push(m);
+  }
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uOpacity: { value: 0 }, uColor: { value: new THREE.Color(color) } },
+    vertexShader: /* glsl */`
+      varying vec3 vN;
+      varying vec3 vP;
+      varying vec2 vUv;
+      void main() {
+        vP = (modelViewMatrix * vec4(position, 1.0)).xyz;
+        vN = normalMatrix * normal;
+        vUv = uv;
+        gl_Position = projectionMatrix * vec4(vP, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      varying vec3 vN;
+      varying vec3 vP;
+      varying vec2 vUv;
+      uniform float uOpacity;
+      uniform vec3 uColor;
+      void main() {
+        // fade where the surface is tangent to the VIEW RAY (true silhouette,
+        // correct even for off-center lamps): the shaft dissolves into the
+        // air instead of reading as a solid triangle. d^1.5 via d*sqrt(d) —
+        // pow(0, y) is undefined behavior in GLSL (NaN on some drivers).
+        float d = clamp(abs(dot(normalize(vN), normalize(vP))), 0.0, 1.0);
+        float facing = d * sqrt(d);
+        float t = clamp(vUv.y, 0.0, 1.0); // 1 at the bulb (apex) → 0 at the rim
+        float a = 0.75 * t * t;           // bulb-bright vertical falloff
+        gl_FragColor = vec4(uColor * (a * facing * uOpacity), 1.0);
+      }`,
+    transparent: true, blending: THREE.AdditiveBlending,
+    depthWrite: false, side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(mergeStaticMeshes(parts), mat);
+  mesh.visible = false;
+  return { mesh, mat, setOpacity(v) { mat.uniforms.uOpacity.value = v; } };
 }
 
 /* ---------------- vehicle-grade loft toolkit (r12 modeling pass) -----------
