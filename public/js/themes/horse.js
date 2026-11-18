@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane, loftSections, loftTube, jitterRock, buildLampCones } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, makeDunes, displaceGroundPlane, loftSections, loftTube, jitterRock, buildLampCones, buildAmbientPoints } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -894,6 +894,13 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const pools = [new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat)];
   // P2 r17: lantern light shafts — one merged additive mesh (TOD-driven)
   const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.5 });
+  // P3 r17: night fireflies drifting between the scrub — one Points draw
+  const fireflies = buildAmbientPoints({
+    count: 150, srng: mulberry32(777001), tex: radialGlowTexture('#ffffff'),
+    color: '#cfff9e', size: 0.55,
+    area: { x: 13, y0: 0.3, y1: 2.4, z0: 10, z1: -55 },
+  });
+  group.add(fireflies.points);
   group.add(lampPosts, lampHeads, pools[0], lampCones.mesh);
 
   /* ---------- sky + stars + moon ---------- */
@@ -1004,6 +1011,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     pools.forEach((p) => (p.material.opacity = tod.lanterns * 0.55));
     lampCones.setOpacity(tod.lanterns * 0.3); // P2: light shafts
     lampCones.mesh.visible = tod.lanterns > 0.01;
+    fireflies.setOpacity(name === 'night' ? 0.9 : 0); // P3: fireflies are night creatures
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
     if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     // the lamp head is an emitting surface: let it punch through tone mapping
@@ -1048,7 +1056,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   setTimeOfDay(timeOfDay);
 
   /* ---------- per-frame ---------- */
+  let fireflyT = 0;
   function update(dt, state) {
+    fireflies.tick((fireflyT += dt)); // P3: one uniform write/frame
+    fireflies.points.position.z += ((vehicles[0]?.visZ ?? 0) - fireflies.points.position.z) * Math.min(1, dt * 2);
     if (!state) return;
     const now = performance.now();
 

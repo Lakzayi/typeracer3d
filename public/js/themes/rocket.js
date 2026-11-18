@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, createSkyDome, setSkyDome, makeGroundPBR, rampHex, mergeStaticMeshes, makeDunes, displaceGroundPlane, jitterRock } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, createSkyDome, setSkyDome, makeGroundPBR, rampHex, mergeStaticMeshes, makeDunes, displaceGroundPlane, jitterRock, buildAmbientPoints } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -755,6 +755,14 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // ~2° sun disc (shared.js), replacing the flat background + washed 90-unit
   // sprite blob (critic r10 #2). Stars sit INSIDE the dome radius so they
   // still show at night.
+  // P3 r17: faint sparkle drifting above the pad — one Points draw
+  const padSparkle = buildAmbientPoints({
+    count: 120, srng: mulberry32(777004), tex: radialGlowTexture('#ffffff'),
+    color: '#a8d8ff', size: 0.45,
+    area: { x: 9, y0: 0.2, y1: 2.2, z0: 10, z1: -55 },
+  });
+  group.add(padSparkle.points);
+
   const sky = createSkyDome(620);
   group.add(sky);
 
@@ -858,13 +866,17 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       const accentK = name === 'night' ? 0.5 : name === 'sunset' ? 0.75 : 1.0;
       v.accentMat.color.copy(v.accentMat.userData.base).multiplyScalar(accentK);
     });
+    padSparkle.setOpacity(name === 'night' ? 0.5 : name === 'sunset' ? 0.15 : 0); // P3
     world.setBloom('rocket', name);
   }
   setTimeOfDay(timeOfDay);
 
   /* ---------- per-frame ---------- */
+  let sparkleT = 0;
   const _tv = new THREE.Vector3(); // reused trail sampler (no per-frame alloc);
   function update(dt, state) {
+    padSparkle.tick((sparkleT += dt)); // P3: one uniform write/frame
+    padSparkle.points.position.z += ((vehicles[0]?.visZ ?? 0) - padSparkle.points.position.z) * Math.min(1, dt * 2);
     if (!state) return;
     const now = performance.now();
 

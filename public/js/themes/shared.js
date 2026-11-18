@@ -542,6 +542,78 @@ export function buildLampCones(spots, { color = '#ffd9a0', radius = 1.5, baseY =
   return { mesh, mat, setOpacity(v) { mat.uniforms.uOpacity.value = v; } };
 }
 
+/* ---------------- P3 r17: ambient particles ---------------------------------
+ * ONE Points draw per theme — fireflies over the river/trail at night, dust
+ * motes in the street by day, sparkle around the pad. ALL motion + flicker
+ * runs in the vertex shader off per-point attributes (phase/freq/amp seeded
+ * from the theme's srng at build), so the CPU cost per frame is a single
+ * uniform write. Points follow the same ground rules as the lamp pools:
+ * world-fixed along the corridor, additive, depthWrite off, per-TOD opacity
+ * via setOpacity (which also gates the draw below 0.01, §1.3).
+ * area: { x, y0, y1, z0, z1 } — x is a ±spread, z spans the corridor. */
+export function buildAmbientPoints({ count, area, tex, color = '#ffffff', size = 0.5, opacity = 0, srng }) {
+  const pos = new Float32Array(count * 3);
+  const phase = new Float32Array(count);
+  const freq = new Float32Array(count);
+  const amp = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    pos[i * 3] = (srng() * 2 - 1) * area.x;
+    pos[i * 3 + 1] = area.y0 + srng() * (area.y1 - area.y0);
+    pos[i * 3 + 2] = area.z0 + srng() * (area.z1 - area.z0);
+    phase[i] = srng() * Math.PI * 2;
+    freq[i] = 0.5 + srng() * 1.5;
+    amp[i] = 0.3 + srng() * 0.7;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+  geo.setAttribute('aFreq', new THREE.BufferAttribute(freq, 1));
+  geo.setAttribute('aAmp', new THREE.BufferAttribute(amp, 1));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 }, uOpacity: { value: opacity }, uSize: { value: size },
+      uTex: { value: tex }, uColor: { value: new THREE.Color(color) },
+    },
+    vertexShader: /* glsl */`
+      attribute float aPhase;
+      attribute float aFreq;
+      attribute float aAmp;
+      uniform float uTime;
+      uniform float uSize;
+      varying float vTw;
+      void main() {
+        vec3 p = position;
+        // slow drift; the flicker rides its own phase so a particle brightens
+        // as it speeds up — the "alive" trick (tr3d-graphics-docs/14)
+        p.x += sin(uTime * aFreq * 0.6 + aPhase) * aAmp * 0.6;
+        p.y += sin(uTime * aFreq * 0.4 + aPhase * 1.7) * aAmp * 0.35;
+        p.z += cos(uTime * aFreq * 0.5 + aPhase * 0.7) * aAmp * 0.6;
+        vTw = 0.55 + 0.45 * sin(uTime * (1.5 + aFreq) + aPhase * 2.3);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = clamp(uSize * (120.0 / max(1.0, -mv.z)), 1.0, 26.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D uTex;
+      uniform float uOpacity;
+      uniform vec3 uColor;
+      varying float vTw;
+      void main() {
+        vec4 tex = texture2D(uTex, gl_PointCoord);
+        gl_FragColor = vec4(uColor * (tex.a * vTw * uOpacity), 1.0);
+      }`,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false; // drift is shader-side; culling would pop them
+  points.visible = false;
+  return {
+    points,
+    setOpacity(v) { mat.uniforms.uOpacity.value = v; points.visible = v > 0.01; },
+    tick(t) { mat.uniforms.uTime.value = t; },
+  };
+}
+
 /* ---------------- vehicle-grade loft toolkit (r12 modeling pass) -----------
  * Real silhouettes come from SWEPT cross-sections, not boxes: a car body is a
  * superellipse ring extruded along a curved height profile, a hull is shaped

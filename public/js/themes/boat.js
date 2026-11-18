@@ -3,7 +3,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock, superRing, loftSections, makeDunes, displaceGroundPlane, buildLampCones } from './shared.js';
+import { expK, canvasTexture, radialGlowTexture, makeLabel, stepVehicle, buildFinishGate, followPlayerSky, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, applyFresnelEnv, jitterRock, superRing, loftSections, makeDunes, displaceGroundPlane, buildLampCones, buildAmbientPoints } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -812,6 +812,13 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const dockPools = new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat);
   // P2 r17: dock lantern shafts down to the waterline — one merged mesh
   const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.4, baseY: 0.42 });
+  // P3 r17: fireflies low over the water near the reeds — one Points draw
+  const fireflies = buildAmbientPoints({
+    count: 120, srng: mulberry32(777002), tex: radialGlowTexture('#ffffff'),
+    color: '#bfe8a0', size: 0.5,
+    area: { x: 12, y0: 0.4, y1: 1.8, z0: 10, z1: -55 },
+  });
+  group.add(fireflies.points);
   group.add(docks, dockPosts, dockHeads, dockPools, lampCones.mesh);
 
   /* ---------- sky + stars + moon ---------- */
@@ -954,6 +961,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     poolMat.opacity = tod.lanterns * 0.55;
     lampCones.setOpacity(tod.lanterns * 0.3); // P2: lantern shafts
     lampCones.mesh.visible = tod.lanterns > 0.01;
+    fireflies.setOpacity(name === 'night' ? 0.85 : 0); // P3
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
     if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     vehicles.forEach((v) => {
@@ -972,6 +980,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   setTimeOfDay(timeOfDay);
 
   /* ---------- per-frame ---------- */
+  let fireflyT = 0;
   // reused temporaries — update() must not allocate (SPEC §1.3)
   const _buoyM = new THREE.Matrix4();
   const _buoyQ = new THREE.Quaternion();
@@ -979,6 +988,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const _UNIT = new THREE.Vector3(1, 1, 1);
   const _ZAXIS = new THREE.Vector3(0, 0, 1);
   function update(dt, state) {
+    fireflies.tick((fireflyT += dt)); // P3: one uniform write/frame
+    fireflies.points.position.z += ((vehicles[0]?.visZ ?? 0) - fireflies.points.position.z) * Math.min(1, dt * 2);
     if (!state) return;
     const now = performance.now();
 

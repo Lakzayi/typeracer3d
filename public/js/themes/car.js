@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { TRACK_LENGTH, mulberry32 } from '../world.js';
-import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock, superRing, loftSections, buildLampCones } from './shared.js';
+import { followPlayerSky, mergeInstancedGeometry, mergeStaticMeshes, createSkyDome, setSkyDome, makeGroundPBR, rampHex, jitterRock, superRing, loftSections, buildLampCones, buildAmbientPoints } from './shared.js';
 
 const LANES = [-4.4, -2.2, 0, 2.2, 4.4];
 
@@ -912,6 +912,15 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   // P2 r17: the light shafts themselves — one merged additive mesh, opacity
   // per TOD (driven next to the pools in setTimeOfDay)
   const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.8 });
+  // P3 r17: dust motes hanging in the air by day — one Points draw,
+  // motion fully in the vertex shader (dedicated srng keeps every existing
+  // layout byte-identical)
+  const dust = buildAmbientPoints({
+    count: 200, srng: mulberry32(777003), tex: radialGlowTexture('#ffffff'),
+    color: '#ffe9c0', size: 0.4,
+    area: { x: 10, y0: 0.3, y1: 3.2, z0: 10, z1: -55 },
+  });
+  group.add(dust.points);
   group.add(lampPoles, lampHeads, lampPools, lampCones.mesh);
 
   /* ---------- sky dome + stars + moon ---------- */
@@ -1041,6 +1050,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     lampPools.visible = tod.lamps > 0.01; // skip the pools' draw call by day
     lampCones.setOpacity(tod.lamps * 0.3); // P2: light shafts, night charm
     lampCones.mesh.visible = tod.lamps > 0.01;
+    dust.setOpacity(name === 'night' ? 0 : name === 'sunset' ? 0.22 : 0.16); // P3: motes live in daylight
     lampHeadMat.color.set(tod.lamps > 0.3 ? '#ffe6b0' : '#8b9099');
     lampHeadMat.toneMapped = tod.lamps <= 0.3; // night head = brightest element (critic r5)
     if (tod.lamps > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
@@ -1060,7 +1070,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
 
   /* ---------- per-frame ---------- */
   let labelTimer = 0;
+  let dustT = 0;
   function update(dt, state) {
+    dust.tick((dustT += dt)); // P3: one uniform write/frame
+    // cloud trails the player with a soft lag: always surrounded, yet
+    // the motes stream past during speed changes (parallax)
+    dust.points.position.z += ((vehicles[0]?.visZ ?? 0) - dust.points.position.z) * Math.min(1, dt * 2);
     if (!state) return;
     labelTimer += dt;
     const refreshLabels = labelTimer > 0.35;
