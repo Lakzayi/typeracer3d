@@ -322,6 +322,7 @@ export function createSkyDome(radius = 620) {
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
+      dithering: true, // P5 r17: kill gradient banding (Bayer 4×4, free)
       vertexShader: `
         varying vec3 vDir;
         void main() {
@@ -332,6 +333,7 @@ export function createSkyDome(radius = 620) {
         uniform vec3 uZenith, uMid, uHorizon, uSunTint, uSunDir;
         uniform float uSunI, uSunCore;
         varying vec3 vDir;
+        #include <dithering_pars_fragment>
         void main() {
           vec3 d = normalize(vDir);
           float h = d.y;
@@ -356,6 +358,7 @@ export function createSkyDome(radius = 620) {
           gl_FragColor = vec4(col, 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
+          #include <dithering_fragment>
         }`,
     })
   );

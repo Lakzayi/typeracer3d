@@ -506,6 +506,25 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     envMapIntensity: tod.waterEnv,
   }), { base: 0.32, rim: 0.68, exp: 4.0 });
   waterMat.normalScale.set(0.6, 0.6);
+  // P4 r17: second ripple layer — two normal fields at different scales and
+  // speeds interfere and read as real moving water instead of one scrolling
+  // tile (tr3d-graphics-docs/14 dual-panning pattern). Injected via
+  // onBeforeCompile on the existing MeshStandardMaterial: no new draw, no
+  // new material, fresnel/env wiring untouched. The offset uniform is shared
+  // by reference so update() can scroll it for one vec2 write per frame.
+  const waterScroll2 = { value: new THREE.Vector2(0, 0) };
+  waterMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uScroll2 = waterScroll2;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec2 uScroll2;')
+      .replace('#include <normal_fragment_maps>', [
+        '#include <normal_fragment_maps>',
+        '  // P4: second ripple field (scaled + counter-panned)',
+        '  vec3 mapN2 = texture2D( normalMap, vNormalMapUv * 2.31 + uScroll2 ).xyz * 2.0 - 1.0;',
+        '  mapN2.xy *= normalScale * 0.62;',
+        '  normal = normalize( tbn * mix( mapN, mapN2, 0.5 ) );',
+      ].join('\n'));
+  };
   const water = new THREE.Mesh(new THREE.PlaneGeometry(14.6, TRACK_LENGTH + 200), waterMat);
   water.receiveShadow = true;
   water.rotation.x = -Math.PI / 2;
@@ -1006,6 +1025,8 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     waterMat.normalMap.offset.y -= dt * 0.11;
     waterMat.normalMap.offset.x += dt * 0.014;
     waterMat.roughnessMap.offset.y -= dt * 0.09;
+    waterScroll2.value.x += dt * 0.021; // P4: second field pans slower and
+    waterScroll2.value.y -= dt * 0.073; // against the first — interference
     // bobbing buoys: one reused matrix per buoy, written into both instanced
     // meshes (body +0.22, pole +0.6 — the old Group offsets)
     for (let bi = 0; bi < BUOY_N; bi++) {
