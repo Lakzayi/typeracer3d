@@ -838,6 +838,9 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     stripMat.color.set(name === 'night' ? '#3a4148' : name === 'sunset' ? '#787878' : '#ffffff');
     stripMat.emissiveIntensity = name === 'night' ? 0.32 : name === 'sunset' ? 0.4 : 0.04;
     holoMats.forEach((m) => (m.opacity = name === 'night' ? 0.5 : name === 'sunset' ? 0.7 : 0.9));
+    // r17 bloom pop: pad beacons cross the bloom threshold at night
+    if (!pylonTipMat.userData.base) pylonTipMat.userData.base = pylonTipMat.color.clone();
+    pylonTipMat.color.copy(pylonTipMat.userData.base).multiplyScalar(name === 'night' ? 2.2 : name === 'sunset' ? 1.2 : 1.0);
     plumeK = name === 'night' ? 0.5 : name === 'sunset' ? 0.75 : 1.0; // dims the
     // additive cones that back-light the bell rim + fin edges at night (r10 #5)
     vehicles.forEach((v) => {
@@ -855,6 +858,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       const accentK = name === 'night' ? 0.5 : name === 'sunset' ? 0.75 : 1.0;
       v.accentMat.color.copy(v.accentMat.userData.base).multiplyScalar(accentK);
     });
+    world.setBloom('rocket', name);
   }
   setTimeOfDay(timeOfDay);
 

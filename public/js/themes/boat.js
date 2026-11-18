@@ -950,10 +950,19 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     reedMat.color.set(name === 'sunset' ? '#5c5638' : name === 'night' ? '#2c3a2a' : '#4d7d3a');
     poolMat.opacity = tod.lanterns * 0.55;
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
+    if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     vehicles.forEach((v) => {
-      v.navMats.forEach((m) => (m.opacity = tod.navLights));
+      // r17 bloom pop: nav lights are real beacons at night — red luma is
+      // weighted low (Rec.709), so night needs a 3.2× HDR push to bloom
+      const navK = name === 'night' ? 3.2 : name === 'sunset' ? 1.4 : 1.0;
+      v.navMats.forEach((m) => {
+        m.opacity = tod.navLights;
+        if (!m.userData.base) m.userData.base = m.color.clone();
+        m.color.copy(m.userData.base).multiplyScalar(navK);
+      });
       if (v.light) v.light.intensity = tod.headlight; // player only
     });
+    world.setBloom('boat', name);
   }
   setTimeOfDay(timeOfDay);
 

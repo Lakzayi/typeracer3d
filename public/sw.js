@@ -9,11 +9,16 @@
  *   gets a TR3D_UPDATED message and reloads itself when idle (no hard refresh).
  * - /api/* always hits the network (real TypeRacer data must never be stale).
  */
-const CACHE = 'tr3d-v1';
+const CACHE = 'tr3d-v2';
 const ASSETS = [
   './', './index.html', './style.css', './manifest.webmanifest', './favicon.svg',
   './vendor/three.module.js', './fonts/inter-var.woff2',
-  './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js',
+  './vendor/jsm/postprocessing/EffectComposer.js', './vendor/jsm/postprocessing/RenderPass.js',
+  './vendor/jsm/postprocessing/ShaderPass.js', './vendor/jsm/postprocessing/MaskPass.js',
+  './vendor/jsm/postprocessing/Pass.js', './vendor/jsm/postprocessing/UnrealBloomPass.js',
+  './vendor/jsm/postprocessing/OutputPass.js', './vendor/jsm/shaders/CopyShader.js',
+  './vendor/jsm/shaders/LuminosityHighPassShader.js', './vendor/jsm/shaders/OutputShader.js',
+  './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js', './js/gfx.js',
   './js/hud.js', './js/sound.js', './js/demo-data.js', './js/modes.js', './js/drills.js', './js/stats.js',
   './js/ghost.js', './js/daily.js', './js/achievements.js', './js/paints.js', './js/share.js',
   './js/net.js', './js/languages.js', './vendor/peerjs.min.js',

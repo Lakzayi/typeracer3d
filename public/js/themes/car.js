@@ -1013,7 +1013,14 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     world.hemi.groundColor.set(tod.hemiGround);
     world.hemi.intensity = tod.hemiIntensity;
     world.ambient.intensity = tod.ambient;
-    boardMats.forEach((m) => (m.opacity = name === 'night' ? 0.55 : name === 'sunset' ? 0.8 : 1.0));
+    // r17 bloom pop: billboards read as LIT panels at night — HDR color >1
+    // so the bloom pass grabs them (day scalar stays 1.0, look unchanged)
+    const boardK = name === 'night' ? 1.9 : name === 'sunset' ? 1.2 : 1.0;
+    boardMats.forEach((m) => {
+      m.opacity = name === 'night' ? 1.0 : name === 'sunset' ? 0.9 : 1.0;
+      m.color.setScalar(boardK);
+    });
+    windowMat.emissiveIntensity = name === 'night' ? 2.1 : name === 'sunset' ? 1.0 : 0.55;
     starMat.opacity = tod.stars;
     moonGlow.material.opacity = tod.moon ? 0.5 : 0;
     moon.visible = !!tod.moon;
@@ -1030,14 +1037,18 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     lampPools.visible = tod.lamps > 0.01; // skip the pools' draw call by day
     lampHeadMat.color.set(tod.lamps > 0.3 ? '#ffe6b0' : '#8b9099');
     lampHeadMat.toneMapped = tod.lamps <= 0.3; // night head = brightest element (critic r5)
+    if (tod.lamps > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     vehicles.forEach((v) => {
       if (v.coneMat) v.coneMat.opacity = tod.cones; // player only (r12: bots
       // never had a light source — the opacity-0 cones were wasted draws)
       if (v.beamPoolMat) v.beamPoolMat.opacity = tod.beam * 4.5;
-      v.tailMat.emissiveIntensity = tod.tail;
+      // r17: red luma is weighted low (Rec.709) — night needs ≈3.6 to cross
+      // the bloom threshold; day keeps the stock look
+      v.tailMat.emissiveIntensity = tod.tail * (name === 'night' ? 3.0 : name === 'sunset' ? 1.2 : 1.0);
       v.headMat.emissiveIntensity = tod.headGlow ?? 0.02; // inset fixture glows at night
       if (v.light) v.light.intensity = tod.headlight; // bots: emissive quads only
     });
+    world.setBloom('car', name);
   }
   setTimeOfDay(timeOfDay);
 

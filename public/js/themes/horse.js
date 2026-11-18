@@ -1000,9 +1000,17 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     });
     pools.forEach((p) => (p.material.opacity = tod.lanterns * 0.55));
     lampHeadMat.color.set(tod.lanterns > 0.3 ? '#ffe6b0' : '#8b9099');
+    if (tod.lanterns > 0.3) lampHeadMat.color.multiplyScalar(2.4); // r17: HDR head → bloom halo
     // the lamp head is an emitting surface: let it punch through tone mapping
     // at night — brightest element of the night scene (critic r5)
     lampHeadMat.toneMapped = tod.lanterns <= 0.3;
+    // r17 bloom pop: the campfire is the night anchor — HDR flame + glow so
+    // the bloom pass picks it up (day scalar 1.0, look unchanged)
+    const fireK = name === 'night' ? 2.2 : name === 'sunset' ? 1.2 : 1.0;
+    if (!flameMat.userData.base) flameMat.userData.base = flameMat.color.clone();
+    flameMat.color.copy(flameMat.userData.base).multiplyScalar(fireK);
+    if (!fireGlowMat.userData.base) fireGlowMat.userData.base = fireGlowMat.color.clone();
+    fireGlowMat.color.copy(fireGlowMat.userData.base).multiplyScalar(fireK);
     flameMat.opacity = tod.fires * 0.9;
     fireFlames.visible = tod.fires > 0.01; // skip the draw call entirely by day
     fireGlowMat.opacity = tod.fires * 0.5; // merged glow disc (one material)
@@ -1021,7 +1029,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
       // the cage is invisible in full daylight (unlit lantern prop — also saves
       // 5 draw calls in the day scene, §1.3) and glows only when dark (r9)
       v.cage.visible = tod.lanterns > 0.05;
-      v.cage.material.emissiveIntensity = tod.lanterns * 1.4;
+      v.cage.material.emissiveIntensity = tod.lanterns * (name === 'night' ? 2.0 : 1.4); // r17: cage crosses bloom at night
       // rider albedo dims with the TOD: a bright mustard shirt + skin glowed
       // against the near-black horse at night (critic r7) — cold dim fill
       const riderK = name === 'night' ? 0.3 : name === 'sunset' ? 0.65 : 1.0;
@@ -1030,6 +1038,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
         m.envMapIntensity = name === 'night' ? 0.05 : 0.15;
       });
     });
+    world.setBloom('horse', name);
   }
   setTimeOfDay(timeOfDay);
 

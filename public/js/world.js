@@ -3,6 +3,7 @@
  * and provide vehicles + scenery; the world owns the cameras and rendering. */
 
 import * as THREE from 'three';
+import { GFX } from './gfx.js';
 
 /* track length in world units — MUTABLE per race: the road scales with the
  * text length so on-screen speed tracks wpm only (a 600-char custom run is a
@@ -123,6 +124,48 @@ export class World {
     this._sparks = this._makeSparks();
     this.scene.add(this._sparks);
 
+    // post-processing composer (r17, tr3d-graphics-docs/90 §1): built lazily
+    // via dynamic import so a failed vendor file degrades to the plain
+    // renderer path below instead of killing the app. The chain is
+    // RenderPass → UnrealBloomPass → OutputPass: the composer's HalfFloat
+    // targets keep linear HDR (three.js skips tone mapping into RTs), bloom
+    // works on HDR, and OutputPass applies ACES + sRGB last — exactly what
+    // renderer.toneMapping did before, so per-TOD exposure keeps working.
+    this.composer = null;
+    this.bloomPass = null;
+    if (this.renderer.capabilities.isWebGL2) {
+      this._composerReady = Promise.all([
+        import('../vendor/jsm/postprocessing/EffectComposer.js'),
+        import('../vendor/jsm/postprocessing/RenderPass.js'),
+        import('../vendor/jsm/postprocessing/UnrealBloomPass.js'),
+        import('../vendor/jsm/postprocessing/OutputPass.js'),
+      ]).then(([EC, RP, BP, OP]) => {
+        if (!GFX.enabled) return; // gate flipped off before init finished
+        const r = this.renderer;
+        // MSAA 4× on the composer's own target (WebGL2): edge AA quality
+        // matches the old antialias:true canvas while everything runs HDR
+        const size = r.getDrawingBufferSize(new THREE.Vector2());
+        const rt = new THREE.WebGLRenderTarget(size.x, size.y, {
+          type: THREE.HalfFloatType, samples: 4,
+        });
+        const composer = new EC.EffectComposer(r, rt);
+        composer.addPass(new RP.RenderPass(this.scene, this.camera));
+        this.bloomPass = new BP.UnrealBloomPass(
+          new THREE.Vector2(size.x, size.y), 0.3, 0.4, 1.0
+        );
+        composer.addPass(this.bloomPass);
+        composer.addPass(new OP.OutputPass());
+        this.composer = composer;
+        // stats are frame-scoped by hand from now on (see render)
+        r.info.autoReset = false;
+        // setBloom() may have run before the modules landed — apply it now
+        if (this._pendingBloom) {
+          this.setBloom(this._pendingBloom[0], this._pendingBloom[1]);
+        }
+        this._syncComposerSize();
+      }).catch(() => { this.composer = null; }); // legacy path stays
+    }
+
     window.addEventListener('resize', () => this._resize());
     this._resize();
   }
@@ -132,6 +175,16 @@ export class World {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this._syncComposerSize();
+  }
+
+  /* keep the composer's RTs + bloom mip chain at the drawing-buffer size
+   * (called from _resize and after a pixel-ratio change by the fps gate) */
+  _syncComposerSize() {
+    if (!this.composer) return;
+    const r = this.renderer;
+    this.composer.setPixelRatio(r.getPixelRatio());
+    this.composer.setSize(r.domElement.clientWidth, r.domElement.clientHeight);
   }
 
   setTheme(theme) {
@@ -179,6 +232,21 @@ export class World {
   setFog(colorHex, density) {
     this.scene.fog.color.set(colorHex);
     this.scene.fog.density = density;
+  }
+
+  /* bloom preset per theme per time-of-day — every theme calls this at the
+   * end of its setTimeOfDay with its key ('car'|'boat'|'horse'|'rocket') and
+   * the TOD name; the values live in gfx.js so all 12 moods stay coherent.
+   * Before the composer finishes loading the preset is parked and applied on
+   * arrival (_pendingBloom). */
+  setBloom(themeKey, todName) {
+    this._pendingBloom = [themeKey, todName];
+    if (!this.bloomPass) return;
+    const p = GFX.for(themeKey, todName);
+    this.bloomPass.enabled = GFX.enabled && p.strength > 0.001;
+    this.bloomPass.strength = p.strength;
+    this.bloomPass.radius = p.radius;
+    this.bloomPass.threshold = p.threshold;
   }
 
   /* tiny gradient sky + ground patch rendered through PMREM (GRAPHICS_PLAN §1.5,
@@ -500,12 +568,17 @@ export class World {
     // frustum follows the car, so 30 Hz shadows read identically here
     if (even) this.renderer.shadowMap.needsUpdate = true;
     const r = this.renderer;
-    r.render(this.scene, this.camera);
-    // draw-call budget probe (SPEC §1.3: "measured, not promised") — samples
-    // 1×/s, only when the QA autoshot harness drives the page. info resets at
-    // each render() call, so the main-pass counts are captured here and the
-    // mirror pass's counts are added after its render below.
+    // info auto-reset is frame-scoped now: with the composer the frame is
+    // several internal renderer.render() calls (composer passes + mirror),
+    // and the draw-call probe below wants the WHOLE frame's totals
     if (this._probeDC === undefined) this._probeDC = location.search.includes('autoshot');
+    if (this._probeDC) r.info.reset();
+    if (this.composer) this.composer.render();
+    else r.render(this.scene, this.camera);
+    // draw-call budget probe (SPEC §1.3: "measured, not promised") — samples
+    // 1×/s, only when the QA autoshot harness drives the page. With
+    // info.autoReset=false + the reset above, the counts captured here are
+    // the composer chain's totals and the mirror pass's are added below.
     const _mainCalls = this._probeDC ? r.info.render.calls : 0;
     const _mainTris = this._probeDC ? r.info.render.triangles : 0;
 
