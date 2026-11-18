@@ -648,7 +648,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     const side = srng() > 0.5 ? 1 : -1;
     const lz = 30 - srng() * (TRACK_LENGTH + 60);
     const lx = side * (10.5 + srng() * 7); // hug the waterline — reads as cut-bank strata
-    const ledge = new THREE.Mesh(new THREE.BoxGeometry(9 + srng() * 15, 0.55, 1.6), ledgeMat);
+    // r17 fix: cap the shelf width so its inner edge never crosses the
+    // water strip (half-width 7.3) — wide shelves used to poke across the river
+    const lw = Math.min(9 + srng() * 15, (Math.abs(lx) - 7.6) * 2);
+    const ledge = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.55, 1.6), ledgeMat);
     ledge.position.set(lx, bankY(lx, lz) + 0.75 + (i % 4) * 0.9, lz);
     ledge.rotation.y = (srng() - 0.5) * 0.2;
     ledgeParts.push(ledge);

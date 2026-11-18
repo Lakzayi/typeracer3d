@@ -749,7 +749,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const scrubParts = [[], []];
   for (let i = 0; i < 96; i++) {
     const side = srng() > 0.5 ? 1 : -1;
-    const sx = side * (6.5 + srng() * 34), sz = 14 - srng() * (TRACK_LENGTH + 30);
+    const sx = side * (7.0 + srng() * 33), sz = 14 - srng() * (TRACK_LENGTH + 30);
     const tuft = new THREE.Mesh(new THREE.ConeGeometry(0.14 + srng() * 0.12, 0.5 + srng() * 0.5, 5), scrubMats[i % 2]);
     tuft.position.set(sx, duneY(sx, sz) + 0.28, sz);
     tuft.rotation.z = (srng() - 0.5) * 0.3;
@@ -764,8 +764,10 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const sandPatchParts = [];
   for (let i = 0; i < 20; i++) {
     const side = srng() > 0.5 ? 1 : -1;
-    const px = side * (10 + srng() * 42), pz = 20 - srng() * (TRACK_LENGTH + 40);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(5 + srng() * 9, 8), sandPatchMat);
+    // r17 fix: radius-first placement — disc edge stays just off the trail
+    const pr = 5 + srng() * 9;
+    const px = side * (6.9 + pr + srng() * 36), pz = 20 - srng() * (TRACK_LENGTH + 40);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(pr, 8), sandPatchMat);
     disc.rotation.x = -Math.PI / 2;
     disc.position.set(px, duneY(px, pz) + 0.1, pz);
     sandPatchParts.push(disc);
@@ -893,7 +895,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const lampHeads = new THREE.Mesh(mergeStaticMeshes(headParts), lampHeadMat);
   const pools = [new THREE.Mesh(mergeStaticMeshes(poolParts), poolMat)];
   // P2 r17: lantern light shafts — one merged additive mesh (TOD-driven)
-  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.5 });
+  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.15 });
   // P3 r17: night fireflies drifting between the scrub — one Points draw
   const fireflies = buildAmbientPoints({
     count: 150, srng: mulberry32(777001), tex: radialGlowTexture('#ffffff'),

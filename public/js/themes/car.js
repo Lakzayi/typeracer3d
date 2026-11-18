@@ -809,8 +809,12 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const patchParts = [[], [], []];
   for (let i = 0; i < 30; i++) {
     const side = srng() > 0.5 ? 1 : -1;
-    const px = side * (10 + srng() * 52), pz = 20 - srng() * (TRACK_LENGTH + 40);
-    const patch = new THREE.Mesh(new THREE.CircleGeometry(6 + srng() * 10, 9), patchMats[i % 3]);
+    // r17 fix: draw the radius FIRST and place the center so the disc's
+    // inner edge stays just off the asphalt (half-width 6.7) — big discs
+    // used to sit half-on the road (live report)
+    const pr = 6 + srng() * 10;
+    const px = side * (6.9 + pr + srng() * 38), pz = 20 - srng() * (TRACK_LENGTH + 40);
+    const patch = new THREE.Mesh(new THREE.CircleGeometry(pr, 9), patchMats[i % 3]);
     patch.rotation.x = -Math.PI / 2;
     patch.rotation.z = srng() * 3;
     patch.position.set(px, 0.09, pz);
@@ -911,7 +915,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
   const lampPools = new THREE.Mesh(mergeStaticMeshes(lampPoolMeshes), lampPoolMat);
   // P2 r17: the light shafts themselves — one merged additive mesh, opacity
   // per TOD (driven next to the pools in setTimeOfDay)
-  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.8 });
+  const lampCones = buildLampCones(lampSpots, { color: '#ffd9a0', radius: 1.15 });
   // P3 r17: dust motes hanging in the air by day — one Points draw,
   // motion fully in the vertex shader (dedicated srng keeps every existing
   // layout byte-identical)
@@ -1048,7 +1052,7 @@ export function create(world, { racers, seed, timeOfDay = 'day' }) {
     });
     lampPoolMat.opacity = tod.lamps * 0.8;
     lampPools.visible = tod.lamps > 0.01; // skip the pools' draw call by day
-    lampCones.setOpacity(tod.lamps * 0.3); // P2: light shafts, night charm
+    lampCones.setOpacity(tod.lamps * 0.26); // P2: light shafts — a faint wisp, not an object
     lampCones.mesh.visible = tod.lamps > 0.01;
     dust.setOpacity(name === 'night' ? 0 : name === 'sunset' ? 0.22 : 0.16); // P3: motes live in daylight
     lampHeadMat.color.set(tod.lamps > 0.3 ? '#ffe6b0' : '#8b9099');

@@ -251,8 +251,11 @@ export class World {
   }
 
   /* quality gate lever (gfx.js applyQuality) — _resize() re-syncs the
-   * composer + bloom mip chain to the new drawing-buffer size */
+   * composer + bloom mip chain to the new drawing-buffer size. A no-op cap
+   * returns early: pass.setSize() reallocs the bloom mip chain even for an
+   * unchanged size, and that realloc IS the mid-race hitch we must avoid. */
   setDPRCap(cap) {
+    if (this._dprCap === cap) return;
     this._dprCap = cap;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap));
     this._resize();

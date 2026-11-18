@@ -56,7 +56,7 @@ export const QualityGate = {
   acc: 0,
   frames: 0,
   cooldown: 0,
-  update(world, dt) {
+  update(world, dt, inRace) {
     if (!GFX.auto || !world) return;
     this.acc += dt;
     this.frames++;
@@ -69,8 +69,13 @@ export const QualityGate = {
     const prev = this.state;
     if (fps < 42 && this.state === 'high') this.state = 'med';
     else if (fps < 42 && this.state === 'med') this.state = 'low';
-    else if (fps > 58 && this.state === 'med') this.state = 'high';
-    else if (fps > 58 && this.state === 'low') this.state = 'med';
+    // Stepping UP mid-race reallocs every render target in the chain (bloom
+    // mips + composer RTs) — a visible hitch — and on machines sitting
+    // between the two thresholds it yoyos low↔high forever (r17 live
+    // report: "everything stalls mid-race"). doc 90 §3: mid-race only ever
+    // DEGRADES; upgrades wait for the menu.
+    else if (!inRace && fps > 58 && this.state === 'med') this.state = 'high';
+    else if (!inRace && fps > 58 && this.state === 'low') this.state = 'med';
     if (this.state !== prev) {
       applyQuality(world, this.state);
       this.cooldown = 6;

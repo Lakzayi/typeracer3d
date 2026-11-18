@@ -1352,7 +1352,7 @@ function loop(t) {
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
   if (!world) return;
-  QualityGate.update(world, dt); // r17: measured fps gate — no timers
+  QualityGate.update(world, dt, !!race); // r17: fps gate — no timers; mid-race it only degrades
 
   if (race) {
     race.update(dt);
