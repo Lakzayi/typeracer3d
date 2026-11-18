@@ -803,6 +803,21 @@ function setPaused(p) {
 
 $('pauseOverlay').addEventListener('click', () => setPaused(false));
 window.addEventListener('blur', () => { if (phase === 'racing') setPaused(true); });
+
+// render watchdog (r17) — a stalled GPU freezes the PICTURE while typing
+// (event-driven) keeps working: the player types blind with zero feedback.
+// If no frame has drawn for 2.5s while visible and racing, pause with a clear
+// message instead. lastFrameAt is refreshed here so resuming always gets a
+// fresh grace window before another stall can re-trigger the pause.
+setInterval(() => {
+  if (!race || race.paused || race.phase !== 'racing') return;
+  if (document.hidden) return;
+  if (performance.now() - lastFrameAt < 2500) return;
+  lastFrameAt = performance.now();
+  setPaused(true);
+  hud.toast('⏸ drawing stalled — paused so you are not typing blind', 3000);
+}, 1000);
+
 hud.els.typingPanel.addEventListener('click', () => typing && typing.focus());
 
 /* caps lock watchdog — with caps on, every letter mismatches and the run dies
@@ -1346,12 +1361,14 @@ $('mpGarageBtn').addEventListener('click', openGarage);
 /* ---------------- render loop ---------------- */
 
 let lastT = performance.now();
+let lastFrameAt = 0; // wall-clock stamp of the last executed frame (render watchdog)
 let menuState = null; // parked-menu racer states — reused, never reallocated
 function loop(t) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
   if (!world) return;
+  lastFrameAt = performance.now(); // this frame IS executing — watchdog sees life
   QualityGate.update(world, dt, !!race); // r17: fps gate — no timers; mid-race it only degrades
 
   if (race) {

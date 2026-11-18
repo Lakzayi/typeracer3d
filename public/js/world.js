@@ -134,6 +134,7 @@ export class World {
     // renderer.toneMapping did before, so per-TOD exposure keeps working.
     this.composer = null;
     this.bloomPass = null;
+    this.usePost = true; // quality gate 'low' flips this off (plain path)
     if (this.renderer.capabilities.isWebGL2) {
       this._composerReady = Promise.all([
         import('../vendor/jsm/postprocessing/EffectComposer.js'),
@@ -585,7 +586,7 @@ export class World {
     // and the draw-call probe below wants the WHOLE frame's totals
     if (this._probeDC === undefined) this._probeDC = location.search.includes('autoshot');
     if (this._probeDC) r.info.reset();
-    if (this.composer) this.composer.render();
+    if (this.composer && this.usePost) this.composer.render();
     else r.render(this.scene, this.camera);
     // draw-call budget probe (SPEC §1.3: "measured, not promised") — samples
     // 1×/s, only when the QA autoshot harness drives the page. With
