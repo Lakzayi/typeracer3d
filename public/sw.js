@@ -18,7 +18,7 @@ const ASSETS = [
   './vendor/jsm/postprocessing/Pass.js', './vendor/jsm/postprocessing/UnrealBloomPass.js',
   './vendor/jsm/postprocessing/OutputPass.js', './vendor/jsm/shaders/CopyShader.js',
   './vendor/jsm/shaders/LuminosityHighPassShader.js', './vendor/jsm/shaders/OutputShader.js',
-  './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js', './js/gfx.js',
+  './js/main.js', './js/api.js', './js/race.js', './js/typing.js', './js/world.js', './js/gfx.js', './js/diag.js',
   './js/hud.js', './js/sound.js', './js/demo-data.js', './js/modes.js', './js/drills.js', './js/stats.js',
   './js/ghost.js', './js/daily.js', './js/achievements.js', './js/paints.js', './js/share.js',
   './js/net.js', './js/languages.js', './vendor/peerjs.min.js',

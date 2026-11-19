@@ -5,6 +5,7 @@
 import { API } from './api.js';
 import { World, hashSeed, setTrackLength, BASE_TRACK } from './world.js';
 import { GFX, QualityGate, applyQuality } from './gfx.js';
+import { diagFrame, diagEvent, dumpText } from './diag.js';
 import { THEMES } from './themes/index.js';
 import { TypingEngine } from './typing.js';
 import { RaceController } from './race.js';
@@ -135,6 +136,7 @@ function applyGfxSetting() {
 /* auto-gate flip → small toast so the change isn't mysterious (doc 16) */
 window.addEventListener('tr3d-gfx', (e) => {
   hud.toast(e.detail === 'high' ? '✨ graphics quality restored' : '⚡ graphics auto-adjusted for smoothness', 2000);
+  diagEvent(`quality gate → ${e.detail}`);
 });
 
 $('language').addEventListener('change', (e) => {
@@ -815,6 +817,7 @@ setInterval(() => {
   if (performance.now() - lastFrameAt < 2500) return;
   lastFrameAt = performance.now();
   setPaused(true);
+  diagEvent('watchdog paused the race (no frame executed)');
   hud.toast('⏸ drawing stalled — paused so you are not typing blind', 3000);
 }, 1000);
 
@@ -1365,6 +1368,7 @@ let lastFrameAt = 0; // wall-clock stamp of the last executed frame (render watc
 let menuState = null; // parked-menu racer states — reused, never reallocated
 function loop(t) {
   requestAnimationFrame(loop);
+  diagFrame(t); // flight recorder — loop cadence evidence
   const dt = Math.min(0.05, (t - lastT) / 1000);
   lastT = t;
   if (!world) return;
@@ -1426,6 +1430,7 @@ window.__tr3d = {
   get themeId() { return currentThemeId; },
   setPaused, startRaceFlow, backToMenu,
 };
+window.__tr3dDump = dumpText; // console one-liner for diagnostic reports
 
 /* installable / offline (PWA) — https or localhost only. The SW revalidates
  * assets after every deploy and messages us when bytes changed; we reload once,
