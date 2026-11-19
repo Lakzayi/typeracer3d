@@ -316,13 +316,13 @@ body {
 
 .menuWrap {
   position: relative; max-width: 1020px; margin: 0 auto;
-  padding: 52px 28px 40px;
+  padding: 44px 28px 36px;
   animation: riseIn 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
 @keyframes riseIn { from { opacity: 0; transform: translateY(22px); } }
 
 /* hero */
-.hero { text-align: center; margin-bottom: 34px; }
+.hero { text-align: center; margin-bottom: 26px; }
 .heroChips { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
@@ -407,13 +407,54 @@ body {
   margin-bottom: 20px;
 }
 .setupRow label {
-  display: block; margin-bottom: 8px; line-height: 1.5;
-  font-size: 10.5px; font-weight: 700; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--faint);
+  display: block; margin-bottom: 8px; line-height: 1.45;
+  font-size: 12.5px; font-weight: 700; letter-spacing: 0.02em;
+  color: var(--dim);
 }
-.setupRow .opt { font-size: 10px; font-weight: 550; letter-spacing: 0.04em; text-transform: none; color: var(--faint); opacity: 0.85; margin-left: 6px; }
+.setupRow .opt { font-size: 11px; font-weight: 550; letter-spacing: 0.01em; text-transform: none; color: var(--dim); opacity: 0.8; margin-left: 6px; }
 .setupRow[hidden] { display: none !important; }
 .setupRowWide { grid-column: 1 / -1; }
+
+/* group header — one glance, one group (race / world) */
+.groupHead {
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 0 16px;
+  font-size: 11.5px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--cyan);
+}
+.groupHead .ghIc { font-size: 15px; letter-spacing: 0; }
+.groupHead::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, rgba(90, 209, 255, 0.35), rgba(255, 255, 255, 0.06)); }
+
+/* garage + multiplayer share one row — two secondary views, half the height */
+.quickRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.quickRow .garageOpenBtn { margin-bottom: 0; }
+
+/* set-once settings live in collapsed groups; the summary always shows the
+ * current values, so most sessions never need to open them */
+.settingsGroup {
+  margin-top: 14px; padding: 0; overflow: hidden;
+  border-radius: var(--r-lg);
+}
+.settingsGroup summary {
+  list-style: none; display: flex; align-items: center; gap: 10px;
+  padding: 15px 20px; cursor: pointer; user-select: none;
+  font-size: 13px; font-weight: 700; color: var(--text);
+  position: relative; z-index: 1;
+}
+.settingsGroup summary::-webkit-details-marker { display: none; }
+.settingsGroup summary .chev { font-size: 9px; color: var(--faint); transition: transform 0.25s var(--spring); }
+.settingsGroup[open] summary .chev { transform: rotate(90deg); }
+.settingsGroup summary .sgTitle { letter-spacing: -0.01em; }
+.settingsGroup summary .sumVals {
+  margin-left: auto; font-size: 11.5px; font-weight: 550; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.settingsGroup .settingsBody {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px;
+  padding: 2px 20px 18px;
+  position: relative; z-index: 1;
+}
+.settingsGroup .settingsBody .setupRowWide { grid-column: 1 / -1; }
 
 /* mode cards — compact pickers, one per game mode */
 .modeGrid {
@@ -433,7 +474,7 @@ body {
 .modeCard .ic { font-size: 21px; line-height: 1; transition: transform 0.25s var(--spring); }
 .modeCard:hover .ic { transform: scale(1.14) rotate(-4deg); }
 .modeCard .nm { font-size: 12.5px; font-weight: 750; letter-spacing: -0.01em; margin-top: 7px; }
-.modeCard .ds { font-size: 9.8px; line-height: 1.4; color: var(--faint); margin-top: 3px; }
+.modeCard .ds { font-size: 11px; line-height: 1.45; color: var(--dim); margin-top: 4px; }
 .modeCard.active {
   border-color: rgba(90, 209, 255, 0.65);
   background: linear-gradient(180deg, rgba(90, 209, 255, 0.14), rgba(139, 123, 255, 0.08));
@@ -475,7 +516,7 @@ body {
 
 .userRow { display: flex; gap: 8px; }
 #userInput, #botWpm, .setupRow select {
-  width: 100%; padding: 12px 14px; font-family: var(--font); font-size: 13.5px; font-weight: 500;
+  width: 100%; padding: 12px 14px; font-family: var(--font); font-size: 14px; font-weight: 500;
   color: var(--text); border-radius: var(--r-sm);
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid rgba(255, 255, 255, 0.13);
@@ -496,7 +537,7 @@ body {
 }
 .setupRow select option {
   background: #0d1324; color: var(--text);
-  padding: 10px 14px; line-height: 1.5; font-size: 13.5px; font-weight: 500;
+  padding: 10px 14px; line-height: 1.5; font-size: 14px; font-weight: 500;
 }
 #loadStats {
   padding: 0 18px; border-radius: var(--r-sm); cursor: pointer;
@@ -506,7 +547,7 @@ body {
 }
 #loadStats:hover { background: rgba(90, 209, 255, 0.18); transform: translateY(-1px); }
 
-.statsLine { margin-top: 8px; font-size: 11.5px; color: var(--faint); min-height: 15px; }
+.statsLine { margin-top: 8px; font-size: 12.5px; color: var(--dim); min-height: 16px; }
 .statsLine.good { color: var(--green); }
 .statsLine.bad { color: var(--red); }
 
@@ -963,6 +1004,8 @@ details.help[open] summary::after { transform: rotate(90deg); }
 @media (max-width: 760px) {
   .menuWrap { padding: 36px 16px 32px; }
   .setupGrid { grid-template-columns: 1fr; }
+  .settingsBody { grid-template-columns: 1fr; }
+  .quickRow { grid-template-columns: 1fr; }
   #statsPanel { transform: scale(0.88); transform-origin: top left; }
   #minimapPanel { transform: scale(0.88); transform-origin: top right; }
   #board { display: none; }

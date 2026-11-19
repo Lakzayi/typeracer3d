@@ -133,19 +133,20 @@
 
       <div id="themeCards" class="themeGrid"></div>
 
-      <!-- your garage — opens as its own full-screen showroom view -->
-      <button id="garageOpenBtn" class="garageOpenBtn glass" type="button">
-        <span class="gIc">🔧</span>
-        <span class="gTx"><b>your garage</b><small><span id="garageMiniLabel">—</span> · saved on this device</small></span>
-        <span class="gDots" id="garageMiniDots"></span>
-      <span class="gGo">OPEN ▸</span>
-    </button>
-
-    <button id="mpOpenBtn" class="garageOpenBtn glass" type="button">
-      <span class="gIc">🎮</span>
-      <span class="gTx"><b>play with a friend</b><small>live online race — peer-to-peer, no server</small></span>
-      <span class="gGo">OPEN ▸</span>
-    </button>
+      <!-- garage + multiplayer: the two secondary views, one compact row -->
+      <div class="quickRow">
+        <button id="garageOpenBtn" class="garageOpenBtn glass" type="button">
+          <span class="gIc">🔧</span>
+          <span class="gTx"><b>your garage</b><small><span id="garageMiniLabel">—</span> · saved on this device</small></span>
+          <span class="gDots" id="garageMiniDots"></span>
+          <span class="gGo">OPEN ▸</span>
+        </button>
+        <button id="mpOpenBtn" class="garageOpenBtn glass" type="button">
+          <span class="gIc">🎮</span>
+          <span class="gTx"><b>play with a friend</b><small>live online race — peer-to-peer, no server</small></span>
+          <span class="gGo">OPEN ▸</span>
+        </button>
+      </div>
 
       <!-- daily challenge — one seeded race per day, same for everyone -->
       <button id="dailyBanner" class="glass dailyBanner" type="button">
@@ -159,6 +160,7 @@
       </button>
 
       <section class="setup glass">
+        <div class="groupHead"><span class="ghIc">🏁</span>the race</div>
         <div class="setupGrid">
           <div class="setupRow setupRowWide">
             <label>Game mode <span class="opt">7 ways to race</span></label>
@@ -212,15 +214,6 @@
             </button>
           </div>
 
-          <div class="setupRow" id="usernameRow">
-            <label>Your TypeRacer username <span class="opt">optional — race as yourself</span></label>
-            <div class="userRow">
-              <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
-              <button id="loadStats">load</button>
-            </div>
-            <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
-          </div>
-
           <div class="setupRow" id="difficultyRow">
             <label>Opponent pace</label>
             <select id="difficulty">
@@ -239,15 +232,18 @@
               <option value="arcade">🕹️ Arcade · wrong keys don't stick</option>
             </select>
           </div>
+        </div>
 
-          <div class="setupRow">
-            <label>Typing key sounds <span class="opt">mechanical clicks</span></label>
-            <select id="keySound">
-              <option value="on" selected>🔊 On</option>
-              <option value="off">🔇 Off</option>
-            </select>
-          </div>
+        <button id="startBtn" class="cta"><span class="ctaInner">🏁 &nbsp;START RACE</span></button>
+        <div id="menuBadge" class="menuBadge"></div>
+        <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
+      </section>
 
+      <!-- world & sound — set-once settings, collapsed until needed; the
+           summary line always shows their current values -->
+      <details class="settingsGroup glass">
+        <summary><span class="chev">▶</span><span class="sgTitle">⚙️ world &amp; sound</span><span class="sumVals" id="worldSum"></span></summary>
+        <div class="settingsBody">
           <div class="setupRow">
             <label>Time of day</label>
             <select id="timeOfDay">
@@ -256,7 +252,6 @@
               <option value="night">🌙 Night</option>
             </select>
           </div>
-
           <div class="setupRow">
             <label>Graphics <span class="opt">auto keeps fps smooth</span></label>
             <select id="gfxQuality">
@@ -265,7 +260,6 @@
               <option value="low">🪫 Low</option>
             </select>
           </div>
-
           <div class="setupRow">
             <label>Language <span class="opt">texts for most modes</span></label>
             <select id="language">
@@ -279,12 +273,30 @@
               <option value="ar">🇸🇦 العربية · RTL</option>
             </select>
           </div>
+          <div class="setupRow">
+            <label>Typing key sounds <span class="opt">mechanical clicks</span></label>
+            <select id="keySound">
+              <option value="on" selected>🔊 On</option>
+              <option value="off">🔇 Off</option>
+            </select>
+          </div>
         </div>
+      </details>
 
-        <button id="startBtn" class="cta"><span class="ctaInner">🏁 &nbsp;START RACE</span></button>
-        <div id="menuBadge" class="menuBadge"></div>
-        <div class="credits">read-only public data from play.typeracer.com · fan project, not affiliated</div>
-      </section>
+      <!-- your profile — an optional identity; collapsed by default -->
+      <details class="settingsGroup glass">
+        <summary><span class="chev">▶</span><span class="sgTitle">👤 your profile</span><span class="sumVals" id="youSum"></span></summary>
+        <div class="settingsBody">
+          <div class="setupRow setupRowWide" id="usernameRow">
+            <label>Your TypeRacer username <span class="opt">optional — race as yourself</span></label>
+            <div class="userRow">
+              <input id="userInput" placeholder="e.g. keegant" maxlength="40"/>
+              <button id="loadStats">load</button>
+            </div>
+            <div id="statsLine" class="statsLine">no stats loaded — bots use fixed pace</div>
+          </div>
+        </div>
+      </details>
 
       <!-- your local stats — recorded after every run, kept on this device -->
       <section id="personalStats" class="glass statsPanel">

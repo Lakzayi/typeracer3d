@@ -87,7 +87,26 @@ function applySettingsToUI() {
   sound.enabled = settings.soundOn;
   syncKeySoundUI();
   applyGfxSetting(); // r17: restore the saved quality choice (or auto gate)
+  refreshSettingsSummaries(); // menu redesign: collapsed groups show live values
 }
+
+/* the collapsed settings groups show their current values right in the
+ * summary line — most sessions never need to open them (menu redesign r17) */
+function refreshSettingsSummaries() {
+  const pick = (id) => $(id)?.selectedOptions?.[0]?.textContent.trim() ?? '';
+  const worldSum = $('worldSum');
+  if (worldSum) {
+    const lang = pick('language').split('·')[0].trim();
+    worldSum.textContent = `${pick('timeOfDay')} · ${pick('gfxQuality')} · ${lang} · ${pick('keySound')}`;
+  }
+  const youSum = $('youSum');
+  if (youSum) {
+    const name = $('userInput').value.trim();
+    youSum.textContent = name ? `racing as ${name}` : 'not set — optional';
+  }
+}
+$('menu').addEventListener('change', refreshSettingsSummaries);
+$('menu').addEventListener('input', refreshSettingsSummaries);
 
 /* ⌨️ mechanical typing clicks — independent of the master mute */
 function syncKeySoundUI() {
