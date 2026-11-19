@@ -1365,6 +1365,7 @@ $('mpGarageBtn').addEventListener('click', openGarage);
 
 let lastT = performance.now();
 let lastFrameAt = 0; // wall-clock stamp of the last executed frame (render watchdog)
+let loopErrN = 0; // per-frame loop errors seen (diag reports the first and every 100th)
 let menuState = null; // parked-menu racer states — reused, never reallocated
 function loop(t) {
   requestAnimationFrame(loop);
@@ -1375,34 +1376,46 @@ function loop(t) {
   lastFrameAt = performance.now(); // this frame IS executing — watchdog sees life
   QualityGate.update(world, dt, !!race); // r17: fps gate — no timers; mid-race it only degrades
 
-  if (race) {
-    race.update(dt);
-    // multiplayer: stream my progress into the room every frame — net.js
-    // throttles the wire traffic, this just keeps the latest state available
-    if (race.mode === 'mp' && race.phase !== 'ready') {
-      setSelfState(typing.pos, typing.recentWpm(), !!typing.finishedAt,
-        typing.finishedAt ? typing.elapsedSec() : null, typing.accuracy());
+  // simulate — a per-frame throw here used to skip the render below as well,
+  // so the picture froze while typing (event-driven) kept working (r17 live
+  // freeze: recentWpm's const bug). Now the error is logged and the LAST
+  // known state keeps drawing — the game never goes blind mid-race.
+  try {
+    if (race) {
+      race.update(dt);
+      // multiplayer: stream my progress into the room every frame — net.js
+      // throttles the wire traffic, this just keeps the latest state available
+      if (race.mode === 'mp' && race.phase !== 'ready') {
+        setSelfState(typing.pos, typing.recentWpm(), !!typing.finishedAt,
+          typing.finishedAt ? typing.elapsedSec() : null, typing.accuracy());
+      }
+      world.speed01 = ghost ? (race.state[world.focusIdx]?.speed01 ?? 0) : race.state[0].speed01;
+      world.combo01 = ghost ? 0 : Math.min(1, (typing?.combo ?? 0) / 45); // 45-combo = full glow
+      sound.engineSpeed(world.smoothSpeed01);
+      world.update(dt, race.state);
+      hud.drawMinimap(race.state);
+      hud.setSpeedGlow(Math.min(1, world.smoothSpeed01 * 0.75 + world.comboGlow * 0.3));
+      hud.setSpeedBlur(Math.min(1, world.smoothSpeed01 * 0.95 + world.comboGlow * 0.3));
+      if (phase === 'racing') {
+        hud.updateBoard(race.state);
+        hud.updateStats(race.state, typing, race.playerRank(), race.state.length);
+        hud.updateCombo(typing.combo);
+      }
+    } else if (world.theme) {
+      // parked menu backdrop — one zero-state array reused per vehicle count
+      // (this line used to allocate N objects every frame, forever)
+      const n = world.theme.vehicles.length;
+      if (!menuState || menuState.length !== n) {
+        menuState = Array.from({ length: n }, () => ({ progress01: 0, speed01: 0, wpm: 0, hideLabel: true }));
+      }
+      world.update(dt, menuState);
     }
-    world.speed01 = ghost ? (race.state[world.focusIdx]?.speed01 ?? 0) : race.state[0].speed01;
-    world.combo01 = ghost ? 0 : Math.min(1, (typing?.combo ?? 0) / 45); // 45-combo = full glow
-    sound.engineSpeed(world.smoothSpeed01);
-    world.update(dt, race.state);
-    hud.drawMinimap(race.state);
-    hud.setSpeedGlow(Math.min(1, world.smoothSpeed01 * 0.75 + world.comboGlow * 0.3));
-    hud.setSpeedBlur(Math.min(1, world.smoothSpeed01 * 0.95 + world.comboGlow * 0.3));
-    if (phase === 'racing') {
-      hud.updateBoard(race.state);
-      hud.updateStats(race.state, typing, race.playerRank(), race.state.length);
-      hud.updateCombo(typing.combo);
+  } catch (err) {
+    loopErrN++;
+    if (loopErrN === 1 || loopErrN % 100 === 0) {
+      diagEvent(`loop error ×${loopErrN}: ${err.message}`);
+      console.error(`loop error ×${loopErrN}`, err);
     }
-  } else if (world.theme) {
-    // parked menu backdrop — one zero-state array reused per vehicle count
-    // (this line used to allocate N objects every frame, forever)
-    const n = world.theme.vehicles.length;
-    if (!menuState || menuState.length !== n) {
-      menuState = Array.from({ length: n }, () => ({ progress01: 0, speed01: 0, wpm: 0, hideLabel: true }));
-    }
-    world.update(dt, menuState);
   }
 
   world.render();
@@ -1431,6 +1444,7 @@ window.__tr3d = {
   setPaused, startRaceFlow, backToMenu,
 };
 window.__tr3dDump = dumpText; // console one-liner for diagnostic reports
+window.__tr3dLoop = loop; // test-driver hook — lets a harness pump the real rAF loop
 
 /* installable / offline (PWA) — https or localhost only. The SW revalidates
  * assets after every deploy and messages us when bytes changed; we reload once,

@@ -422,6 +422,12 @@ const _mgNM = new THREE.Matrix3();
 /* parts: [{ geo, matrix }] — emits one non-indexed BufferGeometry with
  * position/normal/uv, every part pre-transformed by its matrix. */
 function mergeParts(parts) {
+  // an empty merge must yield an empty draw, not a crash: the race seed comes
+  // from the text id, so any distance-split prop group (car mountains' near/
+  // far planes) rolls an empty side ~0.3% of races — and that used to kill
+  // startRaceFlow with "Cannot read properties of undefined (reading 'geo')"
+  // (r17 diag caught it as an unhandled rejection)
+  if (!parts.length) return new THREE.BufferGeometry();
   let total = 0;
   for (const { geo } of parts) {
     const vc = geo.attributes.position.count;
@@ -474,13 +480,14 @@ export function mergeInstancedGeometry(im) {
 /* Separate static Meshes → one merged geometry, meshes removed from parent.
  * Returns the geometry; caller wraps it in a Mesh with the shared material. */
 export function mergeStaticMeshes(meshes) {
+  const live = meshes.filter(Boolean); // a hole in the caller's list must not kill the merge
   const parts = [];
-  for (const mesh of meshes) {
+  for (const mesh of live) {
     mesh.updateMatrix();
     parts.push({ geo: mesh.geometry, matrix: mesh.matrix.clone() });
   }
   const g = mergeParts(parts);
-  for (const mesh of meshes) {
+  for (const mesh of live) {
     mesh.parent?.remove(mesh);
     mesh.geometry.dispose();
   }
