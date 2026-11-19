@@ -597,7 +597,7 @@ body {
   margin-bottom: 18px; padding: 13px 20px; cursor: pointer;
   border-radius: var(--r-lg); text-align: left; font-family: var(--font);
   color: var(--text);
-  background: rgba(10, 15, 29, 0.74);
+  background: rgba(10, 15, 29, 0.82);
   border: 1px solid rgba(90, 209, 255, 0.3);
   box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: transform 0.25s var(--spring), border-color 0.25s, background 0.25s;
@@ -605,7 +605,11 @@ body {
 @supports (backdrop-filter: url('#lg-card')) {
   .garageOpenBtn { backdrop-filter: url('#lg-card') blur(3px) saturate(165%) brightness(1.22); -webkit-backdrop-filter: none; }
 }
-.garageOpenBtn:hover { transform: translateY(-2px); border-color: rgba(90, 209, 255, 0.55); background: rgba(90, 209, 255, 0.12); }
+.garageOpenBtn:hover {
+  transform: translateY(-2px); border-color: rgba(90, 209, 255, 0.55);
+  background-color: rgba(16, 23, 44, 0.88); /* dark base survives the hover */
+  background-image: linear-gradient(rgba(90, 209, 255, 0.14), rgba(90, 209, 255, 0.14)); /* cyan lift on top */
+}
 .garageOpenBtn .gIc { font-size: 22px; }
 .garageOpenBtn .gTx { flex: 1; min-width: 0; }
 .garageOpenBtn .gTx b { display: block; font-size: 14px; font-weight: 750; letter-spacing: -0.01em; }
@@ -805,7 +809,7 @@ body.lang-rtl #typingText { line-height: 2; }
   margin-bottom: 18px; padding: 15px 20px; cursor: pointer;
   border-radius: var(--r-lg); text-align: left; font-family: var(--font);
   color: var(--text);
-  background: rgba(10, 15, 29, 0.74);
+  background: rgba(10, 15, 29, 0.82);
   border: 1px solid rgba(255, 213, 94, 0.28);
   box-shadow: var(--shadow-panel), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: transform 0.25s var(--spring), border-color 0.25s, background 0.25s;
@@ -813,7 +817,11 @@ body.lang-rtl #typingText { line-height: 2; }
 @supports (backdrop-filter: url('#lg-card')) {
   .dailyBanner { backdrop-filter: url('#lg-card') blur(3px) saturate(165%) brightness(1.22); -webkit-backdrop-filter: none; }
 }
-.dailyBanner:hover { transform: translateY(-2px); border-color: rgba(255, 213, 94, 0.55); background: rgba(255, 213, 94, 0.1); }
+.dailyBanner:hover {
+  transform: translateY(-2px); border-color: rgba(255, 213, 94, 0.55);
+  background-color: rgba(26, 22, 11, 0.88); /* dark base survives the hover */
+  background-image: linear-gradient(rgba(255, 213, 94, 0.13), rgba(255, 213, 94, 0.13)); /* gold lift on top */
+}
 .dailyBanner .dIc { font-size: 26px; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.4)); }
 .dailyBanner .dTx { flex: 1; min-width: 0; }
 .dailyBanner .dTx b { display: block; font-size: 14.5px; font-weight: 750; letter-spacing: -0.01em; }
